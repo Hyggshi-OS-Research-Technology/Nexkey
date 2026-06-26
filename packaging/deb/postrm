@@ -1,0 +1,7 @@
+#!/bin/bash
+set -e
+
+rm -f /etc/xdg/autostart/nexkey.desktop
+if command -v ibus >/dev/null 2>&1; then
+    ibus write-cache || true
+fi

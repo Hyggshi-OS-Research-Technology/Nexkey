@@ -1,0 +1,12 @@
+set(CPACK_GENERATOR "DEB")
+set(CPACK_PACKAGE_NAME "nexkey")
+set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Vietnamese Input Method for Linux - NexKey")
+set(CPACK_PACKAGE_CONTACT "hyggshidev@gmail.com")
+set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Hyggshi OS Research Technology")
+set(CPACK_DEBIAN_PACKAGE_SECTION "utils")
+set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "amd64")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "libc6, libstdc++6")
+set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA
+    "${CMAKE_SOURCE_DIR}/packaging/deb/postinst;${CMAKE_SOURCE_DIR}/packaging/deb/postrm")
+include(CPack)

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=NexKey
+GenericName=Vietnamese Input Method
+Comment=Bo go tieng Viet cho Linux
+Exec=nexkey-gui
+Icon=nexkey
+Type=Application
+Categories=Utility;
+Keywords=Vietnamese;input;IME;tieng Viet;
+StartupNotify=false

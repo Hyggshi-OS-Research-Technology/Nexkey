@@ -1,0 +1,13 @@
+<!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object Introspection 1.0//EN"
+ "http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd">
+<node>
+  <interface name="org.nexkey.Settings">
+    <method name="GetMode"><arg direction="out" type="s" name="mode"/></method>
+    <method name="SetMode"><arg direction="in" type="s" name="mode"/></method>
+    <method name="GetMethod"><arg direction="out" type="s" name="method"/></method>
+    <method name="SetMethod"><arg direction="in" type="s" name="method"/></method>
+    <method name="GetEncoding"><arg direction="out" type="s" name="encoding"/></method>
+    <method name="SetEncoding"><arg direction="in" type="s" name="encoding"/></method>
+    <signal name="ModeChanged"><arg type="s" name="mode"/></signal>
+  </interface>
+</node>

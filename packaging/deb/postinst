@@ -1,0 +1,14 @@
+#!/bin/bash
+set -e
+
+if command -v ibus >/dev/null 2>&1; then
+    ibus write-cache || true
+fi
+
+if command -v fcitx5 >/dev/null 2>&1; then
+    fcitx5 --enable nexkey || true
+fi
+
+mkdir -p /etc/xdg/autostart
+cp /usr/share/applications/nexkey.desktop /etc/xdg/autostart/nexkey.desktop 2>/dev/null || true
+echo "NexKey installed. Log out and back in for the input method to appear."

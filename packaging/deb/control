@@ -1,0 +1,10 @@
+Package: nexkey
+Version: 1.0.0
+Section: utils
+Priority: optional
+Architecture: amd64
+Maintainer: Hyggshi OS Research Technology <hyggshidev@gmail.com>
+Depends: libc6, libstdc++6, ibus, fcitx5
+Description: Vietnamese Input Method for Linux
+ NexKey is a Vietnamese input method inspired by Unikey with Telex, VNI,
+ and VIQR input support.

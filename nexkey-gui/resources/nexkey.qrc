@@ -1,0 +1,6 @@
+<RCC>
+  <qresource prefix="/icons">
+    <file alias="nexkey-vi.svg">icons/nexkey-vi.svg</file>
+    <file alias="nexkey-en.svg">icons/nexkey-en.svg</file>
+  </qresource>
+</RCC>
