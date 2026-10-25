@@ -13,5 +13,15 @@ cmake -S "${root}" -B "${build_dir}" \
 cmake --build "${build_dir}" --parallel "$(nproc 2>/dev/null || echo 2)"
 cpack --config "${build_dir}/CPackConfig.cmake" -B "${build_dir}"
 
-printf '\nPackage written to %s\n' "${build_dir}"
-ls -1 "${build_dir}"/*.deb 2>/dev/null || true
+package="$(ls -1 "${build_dir}"/*.deb 2>/dev/null | head -1 || true)"
+if [ -z "${package}" ]; then
+    printf 'The package was not created.\n' >&2
+    exit 1
+fi
+
+printf '\nPackage written to %s\n' "${package}"
+if command -v lsb_release >/dev/null 2>&1; then
+    printf 'Built for the host release: %s\n' "$(lsb_release -ds 2>/dev/null || echo unknown)"
+fi
+printf '\nDepends: %s\n' "$(dpkg-deb --field "${package}" Depends 2>/dev/null || echo unknown)"
+printf '\nInstall it with:\n  sudo apt install %s\n' "${package}"

@@ -127,6 +127,20 @@ jobs:
             || { echo "::error::the Fcitx5 runtime dependency is missing"; exit 1; }
           printf '%s' "$depends" | grep -Eq 'libibus-1\.0-5' \
             || { echo "::error::the IBus runtime dependency is missing"; exit 1; }
+
+          # The 64 bit time_t transition renamed these libraries, so a package
+          # that names only one spelling is uninstallable on half of the
+          # distributions. Both have to be offered as alternatives.
+          for pair in 'libqt6core6t64 | libqt6core6' \
+                      'libqt6gui6t64 | libqt6gui6' \
+                      'libqt6widgets6t64 | libqt6widgets6' \
+                      'libqt6dbus6t64 | libqt6dbus6' \
+                      'libfcitx5core7 | libfcitx5core0'; do
+            if ! printf '%s' "$depends" | grep -qF "$pair"; then
+              echo "::error::the dependency list is not portable, missing: $pair"
+              exit 1
+            fi
+          done
           dpkg-deb --field build/*.deb Recommends | grep -q fcitx5 \
             || { echo "::error::fcitx5 is not a recommended package"; exit 1; }
 
@@ -145,6 +159,25 @@ jobs:
             find "$extract" -name 'nexkey-ibus' || true
             exit 1
           fi
+      - name: Install and remove the package
+        run: |
+          set -e
+          sudo apt-get install -y --no-install-recommends ./build/*.deb
+          dpkg -s nexkey | grep -q '^Status: install ok installed'
+          nexkey version
+          nexkey test "tieengs"
+          test -f /usr/share/fcitx5/addon/nexkey-addon.conf
+          test -f /usr/share/fcitx5/inputmethod/nexkey.conf
+          test -f /usr/share/ibus/component/nexkey.xml
+          test -d /etc/xdg/autostart
+          test -f /etc/xdg/autostart/nexkey.desktop \
+            || { echo "::error::the maintainer script did not install the autostart entry"; ls -l /etc/xdg/autostart; exit 1; }
+          sudo apt-get remove -y nexkey
+          if [ -e /etc/xdg/autostart/nexkey.desktop ]; then
+            echo "::error::the maintainer script did not remove the autostart entry"
+            exit 1
+          fi
+          echo "the package installs and removes cleanly"
       - uses: actions/upload-artifact@v6
         with:
           name: debian-package

@@ -37,7 +37,9 @@ if(NEXKEY_BUILD_CLI)
 endif()
 
 if(NEXKEY_BUILD_GUI)
-    find_package(Qt6 6.4 QUIET COMPONENTS Core Gui Widgets DBus)
+    # Qt 6.2 is the oldest release the tray application is written against, so
+    # it builds on Ubuntu 22.04 and Debian 12 as well as on newer systems.
+    find_package(Qt6 6.2 QUIET COMPONENTS Core Gui Widgets DBus)
     if(Qt6_FOUND)
         add_subdirectory(gui)
     else()

@@ -54,23 +54,76 @@ The maintainer scripts do the following:
 
 ### Dependencies
 
-Runtime dependencies are computed from the built binaries with
-`dpkg-shlibdeps` (`CPACK_DEBIAN_PACKAGE_SHLIBDEPS`), so the exact Qt6 and
-Fcitx5 library packages end up in `Depends`. When `dpkg-shlibdeps` or `file` is
-missing on the build host, CPack falls back to a fixed list derived from the
-components that were enabled:
+```bash
+sudo apt install ./nexkey_2.0.0_amd64.deb
+```
+
+The runtime dependencies are a fixed, portable list derived from the components
+that were enabled at configure time:
 
 ```
-Depends: libc6, libstdc++6, libqt6core6t64 | libqt6core6, ...,
+Depends: libc6, libstdc++6,
+         libqt6core6t64 | libqt6core6, libqt6gui6t64 | libqt6gui6,
+         libqt6widgets6t64 | libqt6widgets6, libqt6dbus6t64 | libqt6dbus6,
          libfcitx5core7 | libfcitx5core0, libibus-1.0-5
 Recommends: fcitx5, fcitx5-frontend-gtk3 | fcitx5-frontend-gtk4 |
             fcitx5-frontend-qt5 | fcitx5-frontend-qt6
 Suggests: fcitx5-config-qt
 ```
 
-`Recommends` is where the actual input method daemons and the toolkit frontends
-live: the backends are useless without Fcitx5 or IBus, but a user who only wants
-the CLI can still install the package.
+The alternatives are not a mistake. The 64 bit time_t transition renamed
+`libqt6core6` and its siblings to `libqt6core6t64` in Ubuntu 24.04 and Debian 13,
+and Fcitx5 replaced `libfcitx5core0` with `libfcitx5core7` in 5.1. A package
+that names only one spelling cannot be installed on the other half of the
+distributions, which is what `|` solves here.
+
+`Recommends` is where the input method daemons and the toolkit frontends live:
+the backends are useless without Fcitx5 or IBus, but a user who only wants the
+CLI can still install the package with `--no-install-recommends`.
+
+Build with `-DNEXKEY_PACKAGING_SHLIBDEPS=ON` to let `dpkg-shlibdeps` calculate
+the exact names of the build host instead. That is what a maintainer uploading
+to a single release wants, but the resulting package then only installs there.
+
+### Build for the release you are on
+
+A binary package is tied to the C library and the Qt version it was linked
+against, not only to the names in `Depends`:
+
+- The CI artifacts are built on Ubuntu 24.04 (glibc 2.39, Qt 6.4, Fcitx5 5.1)
+  and are meant for Ubuntu 24.04 or newer.
+- On an older release, such as Ubuntu 22.04 or Debian 12, the program can still
+  be built from source against the local libraries, which is the supported way
+  to get a working install there.
+
+```bash
+sudo apt install build-essential cmake ninja-build pkg-config \
+     qt6-base-dev libfcitx5core-dev libibus-1.0-dev
+git clone https://github.com/Hyggshi-OS-Research-Technology/Nexkey
+cd Nexkey
+./scripts/package-deb.sh
+sudo apt install ./build-deb/nexkey_*.deb
+```
+
+`./scripts/install-build-deps.sh` performs the first step for apt, dnf, pacman
+and zypper; add `--dry-run` to see the command first.
+
+`scripts/package-deb.sh` prints the host release and the resulting `Depends`
+after building, so the target of the package is never a guess.
+
+### When the install fails
+
+| Message | Meaning |
+| --- | --- |
+| `nexkey : Depends: libqt6core6t64 (...) but it is not installable` | the package was built on a newer release than the host; rebuild it locally as shown above |
+| `Depends: libfcitx5core7 but it is not installable` | Fcitx5 is missing or too old: install `fcitx5` (`libfcitx5core-dev`) first |
+| `version 'GLIBC_2.38' not found` when the tray icon starts | the binary is newer than the C library of the host; rebuild locally |
+| `Unable to locate package fcitx5-config-qt` | the Suggests entry is not in the enabled repositories; install the configuration tool from your desktop's package set |
+| `nexkey-gui: cannot load the xcb platform plugin` | no Qt platform plugin package; install `qt6-qpa-plugins` (or the equivalent) |
+
+`dpkg -I nexkey_*.deb` shows the fields of a package that is already downloaded,
+`dpkg-deb --field <file> Depends` prints only the dependency list, and
+`apt-get install -f` repairs a half installed system.
 
 ### Which backends go where
 

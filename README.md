@@ -59,7 +59,7 @@ with CMake.
 | Compiler | GCC 12+, Clang 15+ (C++23) |
 | Build system | CMake 3.21+ |
 | Core and CLI | none |
-| Tray application | Qt 6.4+ (Core, Gui, Widgets, DBus) |
+| Tray application | Qt 6.2+ (Core, Gui, Widgets, DBus) |
 | Fcitx5 addon | Fcitx5 5.0+ development files |
 | IBus engine | IBus 1.5+ development files |
 | Tests | none |
@@ -70,10 +70,11 @@ Qt and no Fcitx5 still produces the library, the CLI and the test suite.
 ## Build
 
 ```bash
-./scripts/build.sh            # Debug build in ./build
-./scripts/test.sh             # build and run the test suite
-./scripts/package-deb.sh      # CPack Debian package  -> build-deb/*.deb
-./scripts/package-appimage.sh # AppImage with linuxdeploy -> dist/*.AppImage
+./scripts/install-build-deps.sh  # Qt6, Fcitx5 and IBus development files
+./scripts/build.sh               # Debug build in ./build
+./scripts/test.sh                # build and run the test suite
+./scripts/package-deb.sh         # CPack Debian package  -> build-deb/*.deb
+./scripts/package-appimage.sh    # AppImage with linuxdeploy -> dist/*.AppImage
 ```
 
 Manual build:
@@ -96,15 +97,29 @@ Useful CMake options:
 | `NEXKEY_WARNINGS_AS_ERRORS` | `OFF` | Turn compiler warnings into errors |
 | `NEXKEY_INSTALL_DOCS` | `ON` | Install the documentation |
 | `NEXKEY_INSTALL_AUTOSTART` | `ON` | Ship the system wide autostart template |
+| `NEXKEY_PACKAGING_SHLIBDEPS` | `OFF` | Let `dpkg-shlibdeps` name the dependencies for this release only, instead of the portable list |
 
 ## Install and use
+
+```bash
+sudo apt install build-essential cmake ninja-build pkg-config \
+     qt6-base-dev libfcitx5core-dev libibus-1.0-dev   # build dependencies
+./scripts/package-deb.sh                              # -> build-deb/*.deb
+sudo apt install ./build-deb/nexkey_*.deb
+```
+
+`./scripts/install-build-deps.sh` runs the dependency step for apt, dnf, pacman
+and zypper. A manual install works as well and skips the package:
 
 ```bash
 sudo cmake --install build --prefix /usr
 ```
 
-Alternatively use the AppImage, which carries the Fcitx5 addon and the tray
-application (see below).
+A `.deb` from the CI artifacts is built on Ubuntu 24.04 and targets that
+release; on an older release build the package locally with
+`./scripts/package-deb.sh`, which links against the libraries of the host. The
+AppImage carries the Fcitx5 addon and the tray application (see below) and has
+the same limitation.
 
 **Fcitx5**: restart Fcitx5, open `fcitx5-configtool`, add **NexKey** to the
 input method list and switch to it. See [docs/FCITX5.md](docs/FCITX5.md) for the
