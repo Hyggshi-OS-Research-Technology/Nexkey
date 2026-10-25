@@ -438,7 +438,11 @@ void SettingsDialog::importJson()
         }
         if (m_bakMacros->isChecked() && !imported.macros.empty()) {
             current.macros = imported.macros;
-            nexkey::save_macros(current.macros);
+            if (!nexkey::save_macros(current.macros)) {
+                QMessageBox::warning(this, tr("NexKey"),
+                                     tr("Không thể ghi file gõ tắt:\n%1")
+                                         .arg(QString::fromStdString(nexkey::default_macros_path().string())));
+            }
         }
         if (m_bakKeymaps->isChecked()) {
             current.keymap_preset = imported.keymap_preset;
