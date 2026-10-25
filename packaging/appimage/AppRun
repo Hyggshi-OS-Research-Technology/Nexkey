@@ -21,10 +21,15 @@ if [ -d "${here}/usr/plugins" ]; then
     fi
 fi
 
-# The addon is bundled, so Fcitx5 can load it straight from the image.
-if [ -d "${here}/usr/lib/fcitx5" ]; then
-    export FCITX_ADDON_DIRS="${here}/usr/lib/fcitx5${FCITX_ADDON_DIRS:+:${FCITX_ADDON_DIRS}}"
-fi
+# The addon is bundled, so Fcitx5 can load it straight from the image. The
+# library directory is plain "lib" on some distributions and "lib/<triplet>"
+# on Debian based ones, so both layouts are probed.
+for candidate in "${here}/usr/lib/fcitx5" "${here}"/usr/lib/*/fcitx5; do
+    if [ -d "${candidate}" ]; then
+        export FCITX_ADDON_DIRS="${candidate}${FCITX_ADDON_DIRS:+:${FCITX_ADDON_DIRS}}"
+        break
+    fi
+done
 
 # Keep the user configuration in the home directory, never inside the image.
 if [ -z "${XDG_CONFIG_HOME:-}" ] && [ -n "${HOME:-}" ]; then

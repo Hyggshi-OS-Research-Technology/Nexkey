@@ -92,7 +92,7 @@ log "Removing development files from the AppDir"
 rm -rf "${appdir}/usr/include" \
        "${appdir}/usr/lib/cmake" \
        "${appdir}/usr/share/doc"
-find "${appdir}/usr/lib" -name '*.a' -delete 2>/dev/null || true
+find "${appdir}/usr/lib" \( -name '*.a' -o -name 'cmake' -type d \) -exec rm -rf {} + 2>/dev/null || true
 
 desktop_file="${appdir}/usr/share/applications/nexkey.desktop"
 icon_file="${appdir}/usr/share/icons/hicolor/scalable/apps/nexkey.svg"

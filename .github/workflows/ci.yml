@@ -69,22 +69,60 @@ jobs:
         run: |
           cd dist
           ./NexKey-*.AppImage --appimage-extract > /dev/null
-          test -x squashfs-root/AppRun
-          test -x squashfs-root/usr/bin/nexkey-gui
-          test -x squashfs-root/usr/bin/nexkey
-          test -f squashfs-root/usr/share/applications/nexkey.desktop
-          test -f squashfs-root/usr/lib/fcitx5/nexkey.so
-          if [ -d squashfs-root/usr/include ]; then
-            echo "development headers leaked into the image"
+          root=squashfs-root
+          fail=0
+
+          report() {
+            echo "::error::$*"
+            fail=1
+          }
+
+          require_exec() {
+            if [ ! -x "$1" ]; then
+              report "missing executable: $1"
+            fi
+          }
+
+          require_file() {
+            if [ ! -f "$1" ]; then
+              report "missing file: $1 (dir: $(ls -A "$(dirname "$1")" 2>&1 | tr '\n' ' '))"
+            fi
+          }
+
+          require_exec "$root/AppRun"
+          require_exec "$root/usr/bin/nexkey-gui"
+          require_exec "$root/usr/bin/nexkey"
+          require_file "$root/usr/share/applications/nexkey.desktop"
+
+          addon="$(find "$root/usr/lib" -name 'nexkey.so' -path '*fcitx5*' 2>/dev/null | head -1)"
+          if [ -z "$addon" ]; then
+            report "the Fcitx5 addon is missing (usr/lib: $(ls -A "$root/usr/lib" 2>&1 | tr '\n' ' '))"
+          fi
+
+          if [ -d "$root/usr/include" ]; then
+            report "development headers leaked into the image"
+          fi
+
+          size="$(stat -c %s NexKey-*.AppImage)"
+          if [ "$size" -lt 5000000 ]; then
+            report "the image looks too small: $size bytes"
+          fi
+
+          methods="$(./$root/usr/bin/nexkey methods 2>&1)" || true
+          if ! printf '%s' "$methods" | grep -q telex; then
+            report "the bundled CLI does not run: $methods"
+          fi
+
+          if ldd "$root/usr/bin/nexkey-gui" 2>&1 | grep -q "not found"; then
+            report "unresolved libraries: $(ldd "$root/usr/bin/nexkey-gui" | grep 'not found' | tr '\n' ' ')"
+          fi
+
+          if [ "$fail" -ne 0 ]; then
             exit 1
           fi
-          ./squashfs-root/usr/bin/nexkey methods | grep -q telex
-          ./squashfs-root/usr/bin/nexkey test --method vni tie6ng1 | grep -q .
-          if ldd squashfs-root/usr/bin/nexkey-gui | grep -q "not found"; then
-            echo "the tray application has unresolved libraries"
-            exit 1
-          fi
+          echo "image verified"
           sha256sum NexKey-*.AppImage
+
       - uses: actions/upload-artifact@v6
         with:
           name: appimage

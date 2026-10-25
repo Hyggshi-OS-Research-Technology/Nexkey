@@ -54,7 +54,7 @@ Steps performed by the script:
 1. Configure and build a Release tree in `build-appimage/` with `/usr` as the
    install prefix.
 2. Install into `NexKey.AppDir/` with `DESTDIR`, then delete the development
-   files (`usr/include`, `usr/lib/cmake`, `usr/share/doc`, `*.a`).
+   files (`usr/include`, `usr/lib/**/cmake`, `usr/share/doc`, `*.a`).
 3. Download `linuxdeploy` and `linuxdeploy-plugin-qt` into `.tools/` (once).
 4. Run linuxdeploy with the desktop file, the application icon, the custom
    `packaging/appimage/AppRun` and the Qt plugin, so Qt itself and the platform
@@ -93,7 +93,11 @@ chmod +x dist/NexKey-2.0.0-x86_64.AppImage
 | `PATH` | prepends `usr/bin` of the image |
 | `XDG_DATA_DIRS` | prepends `usr/share` of the image |
 | `QT_PLUGIN_PATH`, `QT_QPA_PLATFORM_PLUGIN_PATH` | bundled Qt plugins, when present |
-| `FCITX_ADDON_DIRS` | prepends `usr/lib/fcitx5`, when present |
+| `FCITX_ADDON_DIRS` | prepends the bundled addon directory, when present |
+
+The addon lands in `usr/lib/fcitx5` on distributions that use a plain library
+directory and in `usr/lib/<triplet>/fcitx5` on Debian based ones, so `AppRun`
+probes both layouts.
 
 `FCITX_ADDON_DIRS` is what makes the bundled Fcitx5 addon usable from the
 image: start Fcitx5 from a session where that variable is exported (for example
@@ -128,7 +132,11 @@ bundle fails the build instead of reaching users:
 
 ```bash
 ./NexKey-*.AppImage --appimage-extract
+test -x squashfs-root/AppRun
 test -x squashfs-root/usr/bin/nexkey-gui
-test -f squashfs-root/usr/lib/fcitx5/nexkey.so
+find squashfs-root/usr/lib -name nexkey.so -path '*fcitx5*'
 ./squashfs-root/usr/bin/nexkey methods
 ```
+
+Failures are reported as `::error::` annotations, so a broken bundle shows the
+missing path (and the contents of its directory) directly on the pull request.
