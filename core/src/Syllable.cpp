@@ -229,8 +229,12 @@ std::optional<std::size_t> tone_index(std::span<const Letter> letters,
             return begin + 1;
         }
         const auto first = letters[begin].base;
-        if (style == ToneStyle::Modern && (first == U'o' || first == U'u')) {
-            return begin + 1;
+        const auto second = letters[begin + 1].base;
+        if (style == ToneStyle::Modern) {
+            if ((first == U'o' && (second == U'a' || second == U'e')) ||
+                (first == U'u' && second == U'y')) {
+                return begin + 1;
+            }
         }
         return begin;
     }

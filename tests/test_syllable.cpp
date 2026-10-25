@@ -58,6 +58,12 @@ TEST(tone_index_open_diphthongs)
     EXPECT_EQ(tone_of("khoe", kModern), std::optional<std::size_t>{3});
     EXPECT_EQ(tone_of("khoe", kTraditional), std::optional<std::size_t>{2});
     EXPECT_EQ(tone_of("mai", kModern), std::optional<std::size_t>{1});
+    // ua, ui, oi: main vowel carries tone in both Modern and Traditional
+    EXPECT_EQ(tone_of("cua", kModern), std::optional<std::size_t>{1});
+    EXPECT_EQ(tone_of("cua", kTraditional), std::optional<std::size_t>{1});
+    EXPECT_EQ(tone_of("mua", kModern), std::optional<std::size_t>{1});
+    EXPECT_EQ(tone_of("tui", kModern), std::optional<std::size_t>{1});
+    EXPECT_EQ(tone_of("thoi", kModern), std::optional<std::size_t>{2});
 }
 
 TEST(tone_index_closed_diphthongs)

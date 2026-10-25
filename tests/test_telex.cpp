@@ -73,6 +73,13 @@ TEST(telex_tone_position)
     EXPECT_EQ(render_word("khoer"), std::string("kho\u1EBB"));
     EXPECT_EQ(render_word("khoer", telex_options(nexkey::ToneStyle::Traditional)),
               std::string("kh\u1ECFe"));
+    // Open syllables like ua, ui, oi always put tone on the main vowel (e.g. của, not cuả).
+    EXPECT_EQ(render_word("cuar"), std::string("c\u1EE7a"));
+    EXPECT_EQ(render_word("cuar", telex_options(nexkey::ToneStyle::Traditional)),
+              std::string("c\u1EE7a"));
+    EXPECT_EQ(render_word("muaf"), std::string("m\u00F9a"));
+    EXPECT_EQ(render_word("tuis"), std::string("t\u00FAi"));
+    EXPECT_EQ(render_word("thois"), std::string("th\u00F3i"));
     // Closed syllables put the tone on the second vowel of the nucleus.
     EXPECT_EQ(render_word("hoanf"), std::string("ho\u00E0n"));
     EXPECT_EQ(render_word("hoanf", telex_options(nexkey::ToneStyle::Traditional)),
