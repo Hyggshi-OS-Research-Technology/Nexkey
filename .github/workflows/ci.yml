@@ -114,6 +114,8 @@ jobs:
           }
           require_path 'usr/bin/nexkey-gui'
           require_path 'fcitx5/nexkey\.so'
+          require_path 'usr/share/fcitx5/addon/nexkey\.conf'
+          require_path 'usr/share/fcitx5/inputmethod/nexkey\.conf'
           require_path 'usr/share/applications/nexkey\.desktop'
           require_path 'usr/share/nexkey/nexkey-autostart\.desktop'
           require_path 'usr/lib/([^/]+/)?nexkey/nexkey-ibus'
@@ -150,6 +152,34 @@ jobs:
           test -x "$extract/usr/bin/nexkey"
           "$extract/usr/bin/nexkey" methods | grep -q telex
 
+          # Fcitx5 derives the addon name from the file name in addon/ and
+          # drops an input method entry whose Addon key does not name one of
+          # them, so the two have to agree inside the package.
+          python3 - "$extract" <<'PY'
+          import configparser
+          import pathlib
+          import sys
+
+          root = pathlib.Path(sys.argv[1])
+          addon_dir = root / "usr/share/fcitx5/addon"
+          entry_dir = root / "usr/share/fcitx5/inputmethod"
+          addons = {path.stem for path in addon_dir.glob("*.conf")}
+          print("addons:", ", ".join(sorted(addons)) or "none")
+          entries = list(entry_dir.glob("*.conf"))
+          assert entries, "no input method entry was packaged"
+          for entry in entries:
+              parser = configparser.ConfigParser()
+              parser.read(entry)
+              addon = parser.get("InputMethod", "Addon", fallback="")
+              assert addon, f"{entry.name} has no Addon key"
+              assert addon in addons, (
+                  f"{entry.name} points at the addon '{addon}' but the package only "
+                  f"registers {sorted(addons)}; Fcitx5 would drop the entry"
+              )
+              assert parser.get("InputMethod", "Name", fallback=""), f"{entry.name} has no Name key"
+              print(f"{entry.name} -> addon {addon}")
+          PY
+
           # The component file registers the engine by absolute path, so the
           # path it names has to exist inside the package.
           engine="$(python3 -c "import xml.etree.ElementTree as ET; print(ET.parse('$extract/usr/share/ibus/component/nexkey.xml').getroot().findtext('exec'))")"
@@ -166,7 +196,7 @@ jobs:
           dpkg -s nexkey | grep -q '^Status: install ok installed'
           nexkey version
           nexkey test "tieengs"
-          test -f /usr/share/fcitx5/addon/nexkey-addon.conf
+          test -f /usr/share/fcitx5/addon/nexkey.conf
           test -f /usr/share/fcitx5/inputmethod/nexkey.conf
           test -f /usr/share/ibus/component/nexkey.xml
           test -d /etc/xdg/autostart
@@ -177,6 +207,7 @@ jobs:
             echo "::error::the maintainer script did not remove the autostart entry"
             exit 1
           fi
+          scripts/check-install.sh --prefix /usr
           echo "the package installs and removes cleanly"
       - uses: actions/upload-artifact@v6
         with:

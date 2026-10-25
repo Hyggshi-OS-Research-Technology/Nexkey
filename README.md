@@ -109,10 +109,13 @@ sudo apt install ./build-deb/nexkey_*.deb
 ```
 
 `./scripts/install-build-deps.sh` runs the dependency step for apt, dnf, pacman
-and zypper. A manual install works as well and skips the package:
+and zypper. A source install works as well and skips the package metadata
+entirely, which is the reliable path on a distribution the prebuilt package was
+not built for:
 
 ```bash
-sudo cmake --install build --prefix /usr
+./scripts/install-local.sh            # build and install into /usr/local
+./scripts/check-install.sh            # verify what Fcitx5 needs
 ```
 
 A `.deb` from the CI artifacts is built on Ubuntu 24.04 and targets that

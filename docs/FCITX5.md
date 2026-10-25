@@ -7,8 +7,8 @@ that of any other input method.
 
 ```
 integrations/fcitx5/nexkey.cpp              the addon
-integrations/fcitx5/data/nexkey-addon.conf  addon metadata, Library=nexkey
-integrations/fcitx5/data/nexkey.conf        input method entry, LangCode=vi
+integrations/fcitx5/data/nexkey-addon.conf  addon metadata, installed as addon/nexkey.conf
+integrations/fcitx5/data/nexkey.conf        input method entry, Addon=nexkey, LangCode=vi
 ```
 
 ## How it works
@@ -49,11 +49,16 @@ Installed files:
 
 ```
 /usr/lib/<libdir>/fcitx5/nexkey.so                     the addon
-/usr/share/fcitx5/addon/nexkey-addon.conf              registration
+/usr/share/fcitx5/addon/nexkey.conf                    registration
 /usr/share/fcitx5/inputmethod/nexkey.conf              input method entry
 /usr/share/icons/hicolor/scalable/apps/nexkey.svg      entry icon
 /usr/share/icons/hicolor/scalable/status/nexkey-*.svg  panel icons
 ```
+
+Fcitx5 takes the name of an addon from the file name in `addon/`, and it drops
+an input method entry whose `Addon=` key does not name one of the addons it
+found - without printing anything. That is why the metadata file is called
+`nexkey-addon.conf` in the source tree but is installed as `nexkey.conf`.
 
 The Debian package (`./scripts/package-deb.sh`) does the same and refreshes the
 icon cache. Build with `-DNEXKEY_BUILD_FCITX5=OFF` to skip the addon; building
@@ -84,9 +89,17 @@ without `libfcitx5core-dev` installs everything else and prints a warning.
 Verify that Fcitx5 found the addon:
 
 ```bash
+scripts/check-install.sh             # checks the installed files, see below
 fcitx5-diagnose | grep -i nexkey     # lists the addon and its library
 fcitx5-remote -n                     # the input method in use, e.g. nexkey
 ```
+
+`scripts/check-install.sh [--prefix DIR]` walks the same steps Fcitx5 does:
+it looks for the addon file, checks that the shared object exports the addon
+factory, that the input method entry points at an addon that exists, that the
+icons and the tray application are there, and whether Fcitx5 has to be
+restarted. It prints one line per check and exits with 1 when something is
+missing.
 
 ## Typing
 
@@ -138,7 +151,9 @@ restart. [docs/CONFIGURATION.md](CONFIGURATION.md) lists every key.
 
 | Symptom | Cause and fix |
 | --- | --- |
-| NexKey is missing from the input method list | the files are not where Fcitx5 looks for them, or Fcitx5 was not restarted: check `ls /usr/lib/<libdir>/fcitx5/nexkey.so` and run `fcitx5 -d --replace` |
+| NexKey is missing from the input method list | run `scripts/check-install.sh`: it names the missing or mismatched file. Usually the files are not installed, or Fcitx5 was started before them - `fcitx5 -d --replace` fixes the second case |
+| NexKey stays missing although the files are there | the addon registration and the input method entry disagree. Fcitx5 takes the addon name from the file name, so `share/fcitx5/addon/nexkey.conf` has to exist next to `inputmethod/nexkey.conf`; the checker reports this case and names the file that is wrong |
+| an old NexKey build left files behind | remove the leftovers the checker lists, for example `/usr/share/fcitx5/addon/nexkey-addon.conf`, then restart Fcitx5 |
 | The addon appears in `fcitx5-diagnose` but typing does nothing | NexKey is in EN mode: the panel icon is `EN`, press the toggle key |
 | The toggle key does nothing | it collides with the Fcitx5 trigger or a desktop shortcut; pick another combination with `nexkey config set ui.toggle_key` |
 | Vietnamese text appears twice | IBus and Fcitx5 are both running; use one of them (see [docs/IBUS.md](IBUS.md)) |
@@ -156,7 +171,7 @@ bypasses Fcitx5 entirely and shows whether the engine itself behaves.
 sudo apt remove nexkey          # Debian package
 # or, after a manual install:
 sudo rm -rf /usr/lib/<libdir>/fcitx5/nexkey.so \
-            /usr/share/fcitx5/addon/nexkey-addon.conf \
+            /usr/share/fcitx5/addon/nexkey.conf \
             /usr/share/fcitx5/inputmethod/nexkey.conf
 fcitx5 -d --replace
 ```

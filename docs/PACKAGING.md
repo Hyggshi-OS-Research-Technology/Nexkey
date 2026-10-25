@@ -31,7 +31,7 @@ depending on the prefix CMake was configured with):
 /usr/lib/<libdir>/libnexkey-core.a             static core library
 /usr/include/nexkey/*.hpp                      public headers
 /usr/lib/<libdir>/cmake/NexKey/                CMake package files
-/usr/share/fcitx5/addon/nexkey-addon.conf
+/usr/share/fcitx5/addon/nexkey.conf
 /usr/share/fcitx5/inputmethod/nexkey.conf
 /usr/share/ibus/component/nexkey.xml           IBus component description
 /usr/share/applications/nexkey.desktop
