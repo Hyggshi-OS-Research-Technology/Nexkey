@@ -3,14 +3,12 @@
 
 #include "SettingsDialog.hpp"
 
+#include "Autostart.hpp"
 #include "QtHelpers.hpp"
 
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialogButtonBox>
-#include <QDir>
-#include <QFile>
-#include <QFileInfo>
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QIcon>
@@ -18,7 +16,6 @@
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QPushButton>
-#include <QStandardPaths>
 #include <QTabWidget>
 #include <QVBoxLayout>
 
@@ -26,33 +23,6 @@
 #include <vector>
 
 namespace {
-
-/// Write or remove the XDG autostart entry of the tray application.
-void apply_autostart(bool enabled)
-{
-    const auto directory =
-        QStandardPaths::writableLocation(QStandardPaths::ConfigLocation) + QStringLiteral("/autostart");
-    const auto path = directory + QStringLiteral("/nexkey.desktop");
-
-    if (!enabled) {
-        QFile::remove(path);
-        return;
-    }
-
-    QDir().mkpath(directory);
-    QFile file(path);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
-        return;
-    }
-    file.write("[Desktop Entry]\n"
-               "Type=Application\n"
-               "Name=NexKey\n"
-               "Comment=Vietnamese input method\n"
-               "Exec=nexkey-gui\n"
-               "Icon=nexkey\n"
-               "Terminal=false\n"
-               "X-GNOME-Autostart-enabled=true\n");
-}
 
 /// Fill a combo box from a list of (label, value) pairs.
 void fill_combo(QComboBox* combo, const std::vector<std::pair<QString, int>>& entries)
@@ -100,12 +70,14 @@ SettingsDialog::SettingsDialog(const nexkey::Settings& settings, QWidget* parent
     m_smartBackspace = new QCheckBox(tr("Smart backspace"), this);
     m_englishFallback = new QCheckBox(tr("Keep non-Vietnamese words as typed"), this);
     m_bracketShortcuts = new QCheckBox(tr("Telex bracket shortcuts for the horned vowels"), this);
+    m_candidates = new QCheckBox(tr("Show the word selection window"), this);
 
     auto* enginePage = new QWidget(this);
     auto* engineLayout = new QVBoxLayout(enginePage);
     engineLayout->addWidget(m_smartBackspace);
     engineLayout->addWidget(m_englishFallback);
     engineLayout->addWidget(m_bracketShortcuts);
+    engineLayout->addWidget(m_candidates);
     engineLayout->addStretch();
 
     m_toggleKey = new QLineEdit(this);
@@ -166,6 +138,7 @@ void SettingsDialog::load(const nexkey::Settings& settings)
     m_smartBackspace->setChecked(settings.options.smart_backspace);
     m_englishFallback->setChecked(settings.options.english_fallback);
     m_bracketShortcuts->setChecked(settings.options.bracket_shortcuts);
+    m_candidates->setChecked(settings.options.candidates);
     m_showTrayIcon->setChecked(settings.show_tray_icon);
     m_startWithSystem->setChecked(settings.start_with_system);
     m_toggleKey->setText(QString::fromStdString(settings.toggle_key));
@@ -180,6 +153,7 @@ nexkey::Settings SettingsDialog::settings() const
     result.options.smart_backspace = m_smartBackspace->isChecked();
     result.options.english_fallback = m_englishFallback->isChecked();
     result.options.bracket_shortcuts = m_bracketShortcuts->isChecked();
+    result.options.candidates = m_candidates->isChecked();
     result.show_tray_icon = m_showTrayIcon->isChecked();
     result.start_with_system = m_startWithSystem->isChecked();
     result.toggle_key = m_toggleKey->text().toStdString();
@@ -195,6 +169,6 @@ void SettingsDialog::apply()
                                  .arg(QString::fromStdString(nexkey::default_config_path().string())));
         return;
     }
-    apply_autostart(m_settings.start_with_system);
+    nexkey::gui::apply_autostart(m_settings.start_with_system);
     emit saved(m_settings);
 }

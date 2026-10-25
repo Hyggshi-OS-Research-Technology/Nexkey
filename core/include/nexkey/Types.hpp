@@ -51,6 +51,8 @@ struct Options {
     bool english_fallback{true};
     /// Allow the Telex bracket shortcuts for the horned vowels.
     bool bracket_shortcuts{true};
+    /// Offer the alternative interpretations of a word in a candidate window.
+    bool candidates{true};
 
     friend constexpr bool operator==(const Options&, const Options&) = default;
 };

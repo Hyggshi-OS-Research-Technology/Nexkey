@@ -32,6 +32,7 @@ private:
     QCheckBox* m_smartBackspace{};
     QCheckBox* m_englishFallback{};
     QCheckBox* m_bracketShortcuts{};
+    QCheckBox* m_candidates{};
     QCheckBox* m_showTrayIcon{};
     QCheckBox* m_startWithSystem{};
     QLineEdit* m_toggleKey{};

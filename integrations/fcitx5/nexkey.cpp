@@ -11,6 +11,7 @@
 #include <fcitx/addonfactory.h>
 #include <fcitx/addoninstance.h>
 #include <fcitx/addonmanager.h>
+#include <fcitx/candidatelist.h>
 #include <fcitx/inputcontext.h>
 #include <fcitx/inputmethodengine.h>
 #include <fcitx/inputmethodentry.h>
@@ -20,8 +21,11 @@
 
 #include <chrono>
 #include <filesystem>
+#include <functional>
+#include <memory>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -101,6 +105,34 @@ ToggleKey parse_toggle_key(std::string_view text)
     return result;
 }
 
+/// A candidate of the word selection window. Choosing it commits the text it
+/// carries and ends the composition.
+class NexKeyCandidate final : public fcitx::CandidateWord {
+public:
+    NexKeyCandidate(fcitx::Text text, const std::string& comment, std::string commit,
+                    std::function<void()> onSelect)
+        : commit_(std::move(commit))
+        , onSelect_(std::move(onSelect))
+    {
+        setText(std::move(text));
+        if (!comment.empty()) {
+            setComment(fcitx::Text(comment));
+        }
+    }
+
+    void select(fcitx::InputContext* inputContext) const override
+    {
+        static_cast<void>(inputContext);
+        onSelect_();
+    }
+
+    [[nodiscard]] const std::string& commit_text() const { return commit_; }
+
+private:
+    std::string commit_;
+    std::function<void()> onSelect_;
+};
+
 class NexKeyEngine final : public fcitx::InputMethodEngine {
 public:
     explicit NexKeyEngine(fcitx::Instance* instance)
@@ -129,6 +161,14 @@ public:
 
         const auto key = event.key();
         const auto states = key.states();
+
+        // The word selection window comes first: its keys must not reach the
+        // word parser.
+        if (handle_candidate_key(ic, key)) {
+            event.filterAndAccept();
+            return;
+        }
+
         if (states.test(fcitx::KeyState::Ctrl) || states.test(fcitx::KeyState::Alt) ||
             states.test(fcitx::KeyState::Super)) {
             commit_all(ic);
@@ -240,7 +280,92 @@ private:
         } else {
             panel.setClientPreedit(fcitx::Text(preedit));
         }
+        update_candidates(ic);
         ic->updatePreedit();
+    }
+
+    /// Publish the alternative interpretations of the current word.
+    void update_candidates(fcitx::InputContext* ic)
+    {
+        auto& panel = ic->inputPanel();
+
+        if (!settings_.options.candidates) {
+            panel.setCandidateList(nullptr);
+            return;
+        }
+
+        const auto alternatives = engine_.candidates();
+        if (alternatives.size() < 2) {
+            panel.setCandidateList(nullptr);
+            return;
+        }
+
+        auto list = std::make_unique<fcitx::CommonCandidateList>();
+        list->setPageSize(static_cast<int>(alternatives.size()));
+        list->setSelectionKey(selection_keys());
+
+        for (const auto& alternative : alternatives) {
+            auto word = std::make_unique<NexKeyCandidate>(
+                fcitx::Text(alternative.text), alternative.comment, alternative.text,
+                [this, ic, text = alternative.text] {
+                    engine_.discard();
+                    if (!text.empty()) {
+                        ic->commitString(text);
+                    }
+                    update_preedit(ic);
+                });
+            list->append(std::move(word));
+        }
+        panel.setCandidateList(std::move(list));
+    }
+
+    /// Keys that pick an entry of the word selection window.
+    static fcitx::KeyList selection_keys()
+    {
+        fcitx::KeyList keys;
+        for (int digit = 0; digit < 9; ++digit) {
+            keys.emplace_back(static_cast<fcitx::KeySym>(FcitxKey_1 + digit));
+        }
+        return keys;
+    }
+
+    /// Returns true when the key selected a candidate.
+    bool handle_candidate_key(fcitx::InputContext* ic, const fcitx::Key& key)
+    {
+        if (!engine_.composing()) {
+            return false;
+        }
+        auto* list = ic->inputPanel().candidateList();
+        if (list == nullptr) {
+            return false;
+        }
+
+        const auto symbol = key.sym();
+        if (symbol < FcitxKey_1 || symbol > FcitxKey_9) {
+            return false;
+        }
+
+        // Digits are tone and modifier markers in VNI and literal text in VIQR,
+        // so there they only select a candidate together with Control.
+        const bool digits_are_text = settings_.options.method == nexkey::Method::Vni ||
+                                     settings_.options.method == nexkey::Method::Viqr;
+        const bool with_ctrl = key.states().test(fcitx::KeyState::Ctrl);
+        if (digits_are_text && !with_ctrl) {
+            return false;
+        }
+
+        const int index = static_cast<int>(symbol - FcitxKey_1);
+        if (index >= list->size()) {
+            return false;
+        }
+
+        engine_.discard();
+        const auto text = static_cast<const NexKeyCandidate&>(list->candidate(index)).commit_text();
+        if (!text.empty()) {
+            ic->commitString(text);
+        }
+        update_preedit(ic);
+        return true;
     }
 
     bool handle_toggle_key(const fcitx::KeyEvent& event)

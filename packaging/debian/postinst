@@ -1,9 +1,10 @@
 #!/bin/sh
-# Refresh the input method caches so that NexKey shows up right away.
+# Prepare the autostart entry and refresh the caches.
 set -e
 
-if command -v fcitx5 >/dev/null 2>&1; then
-    fcitx5-remote -r >/dev/null 2>&1 || true
+if [ -f /usr/share/nexkey/nexkey-autostart.desktop ]; then
+    install -D -m 0644 /usr/share/nexkey/nexkey-autostart.desktop \
+        /etc/xdg/autostart/nexkey.desktop
 fi
 
 if command -v update-desktop-database >/dev/null 2>&1; then
@@ -14,5 +15,17 @@ if command -v gtk-update-icon-cache >/dev/null 2>&1; then
     gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor >/dev/null 2>&1 || true
 fi
 
-echo "NexKey installed. Pick 'NexKey' in the Fcitx5 input method list."
+if command -v fcitx5-remote >/dev/null 2>&1; then
+    fcitx5-remote -r >/dev/null 2>&1 || true
+fi
+
+cat <<'MESSAGE'
+NexKey installed.
+
+Next steps:
+  1. Add "NexKey" to the Fcitx5 input method list.
+  2. The tray icon starts with your next session. Turn it off in
+     Settings -> Interface -> "Start automatically when I sign in".
+MESSAGE
+
 exit 0

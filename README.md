@@ -36,9 +36,11 @@ settings window. Everything is built, tested and packaged with CMake.
   the same tone or vowel modifier twice types the key literally.
 - Words that are not plausible Vietnamese, such as `windows` or `jazz`, are
   shown exactly as typed instead of being mangled.
-- Fcitx5 input method with a live VI/EN submode, a VN/EN panel icon and a
-  configurable toggle key.
-- Qt6 tray application with a settings dialog and a D-Bus service
+- Fcitx5 input method with a live VI/EN submode, a VN/EN panel icon, a
+  configurable toggle key and a word selection window that offers the
+  alternative readings of the word being typed.
+- Qt6 tray application with a settings dialog (input method, tone style,
+  charset, toggle key, engine options, autostart) and a D-Bus service
   (`org.nexkey.Daemon`) for scripts and desktop shortcuts.
 - Command line tool to test the engine, convert files between charsets and
   script the configuration.
@@ -85,6 +87,7 @@ Useful CMake options:
 | `NEXKEY_BUILD_FCITX5` | `ON` | Build the Fcitx5 addon when Fcitx5 is found |
 | `NEXKEY_WARNINGS_AS_ERRORS` | `OFF` | Turn compiler warnings into errors |
 | `NEXKEY_INSTALL_DOCS` | `ON` | Install the documentation |
+| `NEXKEY_INSTALL_AUTOSTART` | `ON` | Ship the system wide autostart template |
 
 ## Install and use with Fcitx5
 

@@ -18,7 +18,7 @@ struct Settings {
     /// Key combination that toggles the mode, in portable key notation.
     std::string toggle_key{"Control+Shift"};
     bool show_tray_icon{true};
-    bool start_with_system{false};
+    bool start_with_system{true};
 };
 
 /// `$XDG_CONFIG_HOME/nexkey/nexkey.conf`, or `~/.config/nexkey/nexkey.conf`.

@@ -32,16 +32,45 @@ Contents:
 /usr/share/fcitx5/addon/nexkey-addon.conf
 /usr/share/fcitx5/inputmethod/nexkey.conf
 /usr/share/applications/nexkey.desktop
+/usr/share/nexkey/nexkey-autostart.desktop     template for the autostart entry
 /usr/share/icons/hicolor/scalable/...
 /usr/share/doc/NexKey/                         README, license, docs
+/etc/xdg/autostart/nexkey.desktop              created by postinst, removed by postrm
 ```
 
-`packaging/debian/postinst` refreshes the desktop, icon and Fcitx5 caches;
-`packaging/debian/postrm` removes the autostart entry.
+The maintainer scripts do the following:
 
-Runtime dependencies are `libc6` and `libstdc++6`. Add `fcitx5` to get the
-input method working, and `libqt6widgets6`/`libqt6dbus6` for the tray app; the
-package does not force them so a CLI-only install stays small.
+| Script | Work |
+| --- | --- |
+| `postinst` | installs `/etc/xdg/autostart/nexkey.desktop` from the shipped template, refreshes the desktop, icon and Fcitx5 caches, prints the next steps |
+| `postrm` | removes the autostart entry, refreshes the caches |
+
+### Dependencies
+
+Runtime dependencies are computed from the built binaries with
+`dpkg-shlibdeps` (`CPACK_DEBIAN_PACKAGE_SHLIBDEPS`), so the exact Qt6 and
+Fcitx5 library packages end up in `Depends`. When `dpkg-shlibdeps` or `file` is
+missing on the build host, CPack falls back to a fixed list derived from the
+components that were enabled:
+
+```
+Depends: libc6, libstdc++6, libqt6core6t64 | libqt6core6, ...,
+         libfcitx5core7 | libfcitx5core0
+Recommends: fcitx5, fcitx5-frontend-gtk3 | fcitx5-frontend-gtk4 |
+            fcitx5-frontend-qt5 | fcitx5-frontend-qt6
+Suggests: fcitx5-config-qt
+```
+
+`Recommends` is where the actual input method daemon and the toolkit frontends
+live: the addon is useless without Fcitx5, but a user who only wants the CLI can
+still install the package.
+
+### Autostart
+
+The package shows the tray icon after login. The entry is a normal XDG autostart
+file, so the settings dialog can hide it per user
+(`~/.config/autostart/nexkey.desktop` with `Hidden=true`) and any desktop
+environment can switch it off with its own startup tool.
 
 ## AppImage
 
@@ -126,6 +155,10 @@ the AppImage and a distribution package share the same settings.
 | `core` | Builds the library, the CLI and the tests without Qt or Fcitx5, warnings as errors |
 | `full` | Builds everything with Qt6 and Fcitx5, runs the tests, builds and inspects the Debian package |
 | `appimage` | Builds the AppImage, extracts it and checks the layout, the bundled libraries and the CLI |
+
+The `full` job also checks the produced package: the tray binary, the addon, the
+desktop file and the autostart template must be inside, `Depends` must mention
+the Qt6 and Fcitx5 libraries, and the extracted CLI must run.
 
 The AppImage job verifies the image contents before uploading, so a broken
 bundle fails the build instead of reaching users:

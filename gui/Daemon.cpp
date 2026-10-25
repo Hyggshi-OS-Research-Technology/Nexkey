@@ -3,6 +3,7 @@
 
 #include "Daemon.hpp"
 
+#include "Autostart.hpp"
 #include "QtHelpers.hpp"
 
 #include <QTimer>
@@ -14,6 +15,9 @@ Daemon::Daemon(QObject* parent)
     , m_config_path(nexkey::default_config_path())
 {
     reload();
+    // Keep the autostart entry in sync with the configuration, so editing the
+    // file by hand has the same effect as using the settings dialog.
+    nexkey::gui::apply_autostart(m_settings.start_with_system);
 
     auto* watch = new QTimer(this);
     watch->setInterval(1000);
@@ -105,8 +109,12 @@ void Daemon::reload()
     }
 
     const bool mode_was = m_settings.enabled;
+    const bool autostart_was = m_settings.start_with_system;
     m_settings = nexkey::load_settings(m_config_path);
 
+    if (autostart_was != m_settings.start_with_system) {
+        nexkey::gui::apply_autostart(m_settings.start_with_system);
+    }
     if (mode_was != m_settings.enabled) {
         emit modeChanged(mode());
     }

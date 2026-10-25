@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=NexKey
+GenericName=Vietnamese Input Method
+Comment=Start the NexKey tray icon with the desktop session
+Exec=nexkey-gui
+Icon=nexkey
+Terminal=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+X-KDE-autostart-after=panel

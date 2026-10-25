@@ -1,6 +1,7 @@
 add_executable(nexkey-tests
     main.cpp
     test_encoding.cpp
+    test_candidates.cpp
     test_engine.cpp
     test_settings.cpp
     test_syllable.cpp

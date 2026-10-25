@@ -34,7 +34,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build ${QT_PACKAGES} libfcitx5core-dev
+          sudo apt-get install -y cmake ninja-build dpkg-dev file ${QT_PACKAGES} libfcitx5core-dev
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DNEXKEY_WARNINGS_AS_ERRORS=ON
       - name: Build
@@ -45,9 +45,28 @@ jobs:
         run: cmake --build build --target package
       - name: Inspect the package
         run: |
+          set -e
           dpkg-deb --info build/*.deb
-          dpkg-deb --contents build/*.deb | grep -E 'nexkey-gui|fcitx5/nexkey.so|nexkey.desktop'
-          dpkg-deb --contents build/*.deb > /dev/null
+          contents="$(dpkg-deb --contents build/*.deb)"
+          printf '%s\n' "$contents" | grep -E 'usr/bin/nexkey-gui'
+          printf '%s\n' "$contents" | grep -E 'fcitx5/nexkey\.so'
+          printf '%s\n' "$contents" | grep -E 'usr/share/applications/nexkey.desktop'
+          printf '%s\n' "$contents" | grep -E 'usr/share/nexkey/nexkey-autostart.desktop'
+
+          depends="$(dpkg-deb --field build/*.deb Depends)"
+          echo "Depends: $depends"
+          printf '%s' "$depends" | grep -Eq 'libqt6core6|libqt6core6t64' \
+            || { echo "::error::the Qt6 runtime dependency is missing"; exit 1; }
+          printf '%s' "$depends" | grep -Eq 'libfcitx5core' \
+            || { echo "::error::the Fcitx5 runtime dependency is missing"; exit 1; }
+          dpkg-deb --field build/*.deb Recommends | grep -q fcitx5 \
+            || { echo "::error::fcitx5 is not a recommended package"; exit 1; }
+
+          extract="$(mktemp -d)"
+          dpkg-deb --extract build/*.deb "$extract"
+          test -x "$extract/usr/bin/nexkey-gui"
+          test -x "$extract/usr/bin/nexkey"
+          "$extract/usr/bin/nexkey" methods | grep -q telex
       - uses: actions/upload-artifact@v6
         with:
           name: debian-package

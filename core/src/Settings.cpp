@@ -120,6 +120,8 @@ Settings load_settings(const std::filesystem::path& path)
             } else if (key == "bracket_shortcuts") {
                 settings.options.bracket_shortcuts =
                     parse_bool(value, settings.options.bracket_shortcuts);
+            } else if (key == "candidates") {
+                settings.options.candidates = parse_bool(value, settings.options.candidates);
             }
         } else if (section == "ui") {
             if (key == "toggle_key") {
@@ -163,6 +165,7 @@ bool save_settings(const Settings& settings, const std::filesystem::path& path)
          << "smart_backspace=" << (settings.options.smart_backspace ? "true" : "false") << '\n'
          << "english_fallback=" << (settings.options.english_fallback ? "true" : "false") << '\n'
          << "bracket_shortcuts=" << (settings.options.bracket_shortcuts ? "true" : "false") << '\n'
+         << "candidates=" << (settings.options.candidates ? "true" : "false") << '\n'
          << "\n[ui]\n"
          << "toggle_key=" << settings.toggle_key << '\n'
          << "show_tray_icon=" << (settings.show_tray_icon ? "true" : "false") << '\n'

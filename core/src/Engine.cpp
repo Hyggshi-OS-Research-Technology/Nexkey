@@ -8,6 +8,8 @@
 #include "nexkey/Converter.hpp"
 #include "nexkey/Unicode.hpp"
 
+#include <algorithm>
+
 namespace nexkey {
 
 Engine::Engine(Options options)
@@ -38,17 +40,82 @@ void Engine::discard()
     reset_state();
 }
 
-std::string Engine::render(std::string_view raw) const
+namespace {
+
+/// Render a word of raw keystrokes with an explicit option set.
+std::string render_with(std::string_view raw, const Options& options)
 {
     if (raw.empty()) {
         return {};
     }
-    const auto word = detail::parse(m_options.method, raw, m_options);
-    if (m_options.english_fallback && !word.escaped &&
+    const auto word = detail::parse(options.method, raw, options);
+    if (options.english_fallback && !word.escaped &&
         !detail::is_plausible(word.to_letters())) {
         return std::string(raw);
     }
-    return Converter::encode(m_options.encoding, detail::compose_word(word, m_options));
+    return Converter::encode(options.encoding, detail::compose_word(word, options));
+}
+
+bool contains(const std::vector<Candidate>& candidates, const std::string& text)
+{
+    return std::ranges::any_of(candidates, [&text](const Candidate& candidate) {
+        return candidate.text == text;
+    });
+}
+
+} // namespace
+
+std::string Engine::render(std::string_view raw) const
+{
+    return render_with(raw, m_options);
+}
+
+std::vector<Candidate> Engine::candidates() const
+{
+    std::vector<Candidate> result;
+    if (m_raw.empty() || !m_options.candidates) {
+        return result;
+    }
+
+    const auto word = detail::parse(m_options.method, m_raw, m_options);
+    const bool plausible =
+        word.escaped || detail::is_plausible(word.to_letters());
+
+    result.push_back(Candidate{m_preedit, {}});
+
+    if (plausible) {
+        Options alternative = m_options;
+        alternative.tone_style = m_options.tone_style == ToneStyle::Modern
+                                     ? ToneStyle::Traditional
+                                     : ToneStyle::Modern;
+        if (const auto text = render_with(m_raw, alternative); !contains(result, text)) {
+            result.push_back(Candidate{text, std::string(to_string(alternative.tone_style))});
+        }
+    }
+
+    // The raw keystrokes are the last resort when the rules mangle a word.
+    if (!contains(result, m_raw)) {
+        result.push_back(Candidate{m_raw, std::string("raw")});
+    }
+
+    if (result.size() < 2) {
+        return {};
+    }
+    return result;
+}
+
+Step Engine::commit_candidate(std::size_t index)
+{
+    const auto options = candidates();
+    if (options.empty() || index >= options.size()) {
+        return Step{};
+    }
+
+    Step step;
+    step.commit = options[index].text;
+    step.handled = !step.commit.empty();
+    reset_state();
+    return step;
 }
 
 bool Engine::plausible(std::string_view raw) const

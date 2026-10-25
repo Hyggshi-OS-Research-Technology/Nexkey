@@ -60,6 +60,7 @@ shortcut and the bracket shortcuts.
 | `smart_backspace` | `true`, `false` | `true` | Skip keystrokes that had no visible effect when deleting |
 | `english_fallback` | `true`, `false` | `true` | Show the raw keystrokes while the word is not Vietnamese |
 | `bracket_shortcuts` | `true`, `false` | `true` | `[`, `]`, `{`, `}` produce the horned vowels in Telex |
+| `candidates` | `true`, `false` | `true` | Show the word selection window with the alternative readings |
 
 ### `[ui]`
 
@@ -67,11 +68,40 @@ shortcut and the bracket shortcuts.
 | --- | --- | --- | --- |
 | `toggle_key` | portable key name | `Control+Shift` | Shortcut that switches between VI and EN |
 | `show_tray_icon` | `true`, `false` | `true` | Show the tray icon |
-| `start_with_system` | `true`, `false` | `false` | Install an XDG autostart entry |
+| `start_with_system` | `true`, `false` | `true` | Start the tray icon with the desktop session |
 
 `toggle_key` accepts a modifier only combination such as `Control+Shift`, which
 triggers when the modifiers are released, or a full combination such as
 `Ctrl+Shift+space` / `Control+space`, which triggers on the key press.
+
+`start_with_system` is applied to the standard XDG autostart directory. A
+distribution package installs `/etc/xdg/autostart/nexkey.desktop`; switching the
+option off writes `~/.config/autostart/nexkey.desktop` with `Hidden=true`, which
+hides that entry for the current user only. Without a package, for example with
+the AppImage, a normal per user entry is written instead.
+
+## Candidate window
+
+While a word is being composed the Fcitx5 addon shows the alternative readings
+of the keystrokes, so the user can pick one instead of relying on the default:
+
+| Entry | Meaning |
+| --- | --- |
+| the preedit itself | what the current settings produce, the default |
+| the other tone style | same word with `modern` or `traditional` placement, commented with the style it uses |
+| the raw keystrokes | the keys exactly as typed, commented `raw`, useful when a rule mangles an unusual word |
+
+Selection keys:
+
+- Telex and Simple Telex: `1` to `9` pick an entry, because digits have no
+  meaning in those methods.
+- VNI and VIQR: digits are tone markers and literal text, so they keep typing
+  and selection uses `Ctrl` plus a digit, or a click in the candidate window.
+- Typing a separator such as space commits the default entry.
+
+The window only appears when there is something to choose; a word with a single
+possible reading is committed normally. Turn it off with
+`nexkey config set engine.candidates false`.
 
 ## Command line
 
@@ -80,6 +110,7 @@ nexkey config                 # print every effective value
 nexkey config get input.method
 nexkey config set input.method vni
 nexkey config set engine.english_fallback false
+nexkey config set engine.candidates false
 nexkey config path            # print the path of the configuration file
 nexkey status                 # same values, plus the current mode
 nexkey toggle                 # switch between VI and EN mode
@@ -102,9 +133,9 @@ The tray application registers `org.nexkey.Daemon` on the session bus at
 | `Toggle()` | method | Switches the mode |
 | `Reload()` | method | Re-reads the configuration file |
 | `ShowSettings()` | method | Opens the settings window of the running instance |
+| `SettingsRequested()` | signal | Emitted when a window should be shown |
 | `ModeChanged(QString)` | signal | Emitted when the mode changes |
 | `SettingsChanged()` | signal | Emitted when any setting changes |
-| `SettingsRequested()` | signal | Emitted when a window should be shown |
 
 Examples:
 

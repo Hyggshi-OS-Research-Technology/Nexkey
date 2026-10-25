@@ -22,6 +22,15 @@ struct Step {
     bool handled{false};
 };
 
+/// One entry of the candidate window.
+struct Candidate {
+    /// Text that is committed when the entry is chosen, encoded like the
+    /// preedit.
+    std::string text;
+    /// Short ASCII label shown next to the entry, may be empty.
+    std::string comment;
+};
+
 /// Stateful keystroke engine: one instance per input context.
 class Engine {
 public:
@@ -58,6 +67,16 @@ public:
 
     /// True when the word typed so far is a plausible Vietnamese word.
     [[nodiscard]] bool plausible(std::string_view raw) const;
+
+    /// Alternative interpretations of the current composition.
+    ///
+    /// The first entry is always the text shown as the preedit. The list is
+    /// empty when the word is complete or when there is nothing to choose
+    /// from.
+    [[nodiscard]] std::vector<Candidate> candidates() const;
+
+    /// Commit one specific candidate and start a new word.
+    [[nodiscard]] Step commit_candidate(std::size_t index);
 
 private:
     void recompute();

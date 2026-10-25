@@ -6,6 +6,8 @@ set(CMAKE_AUTORCC ON)
 
 qt_add_executable(nexkey-gui
     main.cpp
+    Autostart.cpp
+    Autostart.hpp
     QtHelpers.hpp
     Daemon.cpp
     Daemon.hpp

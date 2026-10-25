@@ -52,6 +52,7 @@ void print_settings(std::ostream& out, const Settings& settings)
         << "smart_backspace=" << bool_text(settings.options.smart_backspace) << '\n'
         << "english_fallback=" << bool_text(settings.options.english_fallback) << '\n'
         << "bracket_shortcuts=" << bool_text(settings.options.bracket_shortcuts) << '\n'
+        << "candidates=" << bool_text(settings.options.candidates) << '\n'
         << "toggle_key=" << settings.toggle_key << '\n'
         << "show_tray_icon=" << bool_text(settings.show_tray_icon) << '\n'
         << "start_with_system=" << bool_text(settings.start_with_system) << '\n'
@@ -80,6 +81,9 @@ std::optional<std::string> config_value(const Settings& settings, std::string_vi
     }
     if (key == "engine.bracket_shortcuts") {
         return std::string(bool_text(settings.options.bracket_shortcuts));
+    }
+    if (key == "engine.candidates") {
+        return std::string(bool_text(settings.options.candidates));
     }
     if (key == "ui.toggle_key") {
         return settings.toggle_key;
@@ -148,6 +152,8 @@ bool apply_config(Settings& settings, std::string_view key, std::string_view val
         settings.options.english_fallback = flag;
     } else if (key == "engine.bracket_shortcuts") {
         settings.options.bracket_shortcuts = flag;
+    } else if (key == "engine.candidates") {
+        settings.options.candidates = flag;
     } else if (key == "ui.show_tray_icon") {
         settings.show_tray_icon = flag;
     } else if (key == "ui.start_with_system") {
@@ -220,6 +226,9 @@ int run_test(const Args& args)
     if (parser.has("no-smart-backspace")) {
         options.smart_backspace = false;
     }
+    if (parser.has("no-candidates")) {
+        options.candidates = false;
+    }
 
     const bool trace = parser.has("trace");
     Args lines;
@@ -233,8 +242,23 @@ int run_test(const Args& args)
         }
     }
 
+    const bool show_candidates = parser.has("candidates");
     for (const auto& line : lines) {
         std::cout << compose_line(line, options, trace, std::cout) << '\n';
+        if (show_candidates) {
+            Engine engine(options);
+            for (const char key : line) {
+                static_cast<void>(engine.type(key));
+            }
+            const auto candidates = engine.candidates();
+            for (std::size_t index = 0; index < candidates.size(); ++index) {
+                std::cout << "  [" << index + 1 << "] " << candidates[index].text;
+                if (!candidates[index].comment.empty()) {
+                    std::cout << "  (" << candidates[index].comment << ')';
+                }
+                std::cout << '\n';
+            }
+        }
     }
     return 0;
 }
