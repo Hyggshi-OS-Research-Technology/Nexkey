@@ -13,13 +13,17 @@
 #include <fcitx/addonmanager.h>
 #include <fcitx/candidatelist.h>
 #include <fcitx/inputcontext.h>
+#include <fcitx/inputcontextmanager.h>
+#include <fcitx/inputcontextproperty.h>
 #include <fcitx/inputmethodengine.h>
 #include <fcitx/inputmethodentry.h>
 #include <fcitx/inputpanel.h>
 #include <fcitx/instance.h>
 #include <fcitx/text.h>
+#include <fcitx/userinterface.h>
 
 #include <chrono>
+#include <cstddef>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -34,6 +38,7 @@ using namespace std::chrono_literals;
 
 constexpr std::string_view kViIcon{"nexkey-vn"};
 constexpr std::string_view kEnIcon{"nexkey-en"};
+constexpr std::string_view kPropertyName{"nexkey-state"};
 
 struct ToggleKey {
     fcitx::Key key{fcitx::Key(FcitxKey_None)};
@@ -105,6 +110,20 @@ ToggleKey parse_toggle_key(std::string_view text)
     return result;
 }
 
+/// Everything that belongs to one input context.
+///
+/// Fcitx 5 hands every window, tab and text field its own input context and
+/// switches between them without notice, so the composition must live here and
+/// not in the addon: otherwise a half typed word of one window leaks into
+/// another. The configuration on the other hand is shared by all of them.
+class NexKeyState final : public fcitx::InputContextProperty {
+public:
+    nexkey::Engine engine;
+    /// Value of the addon wide configuration generation the options above
+    /// were taken from.
+    unsigned generation{0};
+};
+
 /// A candidate of the word selection window. Choosing it commits the text it
 /// carries and ends the composition.
 class NexKeyCandidate final : public fcitx::CandidateWord {
@@ -137,9 +156,27 @@ class NexKeyEngine final : public fcitx::InputMethodEngine {
 public:
     explicit NexKeyEngine(fcitx::Instance* instance)
         : instance_(instance)
+        , state_factory_([this](fcitx::InputContext& inputContext) {
+            static_cast<void>(inputContext);
+            auto* state = new NexKeyState;
+            state->generation = generation_;
+            state->engine.set_options(settings_.options);
+            return state;
+        })
     {
+        // Never let one input context see the composition of another. This also
+        // makes the state available to every input context that appears later.
+        if (!instance_->inputContextManager().registerProperty(
+                std::string(kPropertyName), &state_factory_)) {
+            FCITX_WARN() << "NexKey: the input context property is already registered";
+        }
         reload_settings(true);
     }
+
+    NexKeyEngine(const NexKeyEngine&) = delete;
+    NexKeyEngine& operator=(const NexKeyEngine&) = delete;
+
+    ~NexKeyEngine() override { state_factory_.unregister(); }
 
     void keyEvent(const fcitx::InputMethodEntry& entry, fcitx::KeyEvent& event) override
     {
@@ -159,68 +196,73 @@ public:
             return;
         }
 
+        auto& state = state_of(ic);
         const auto key = event.key();
-        const auto states = key.states();
 
         // The word selection window comes first: its keys must not reach the
-        // word parser.
-        if (handle_candidate_key(ic, key)) {
+        // word parser. It also decides on its own when to keep the key, so the
+        // return value is all that matters here.
+        if (handle_candidate_key(ic, state, key)) {
             event.filterAndAccept();
             return;
         }
 
+        const auto states = key.states();
         if (states.test(fcitx::KeyState::Ctrl) || states.test(fcitx::KeyState::Alt) ||
             states.test(fcitx::KeyState::Super)) {
-            commit_all(ic);
+            commit_all(ic, state);
             return;
         }
 
         if (!settings_.enabled) {
-            commit_all(ic);
+            commit_all(ic, state);
             return;
         }
 
         if (key.sym() == FcitxKey_BackSpace) {
-            const auto step = engine_.backspace();
+            const auto step = state.engine.backspace();
             if (!step.handled) {
-                commit_all(ic);
+                commit_all(ic, state);
                 return;
             }
-            update_preedit(ic);
+            update_preedit(ic, state);
             event.filterAndAccept();
             return;
         }
 
         if (key.sym() == FcitxKey_Return || key.sym() == FcitxKey_KP_Enter ||
             key.sym() == FcitxKey_Escape || key.sym() == FcitxKey_Tab) {
-            commit_all(ic);
+            commit_all(ic, state);
             return;
         }
 
         const auto code_point = fcitx::Key::keySymToUnicode(key.sym());
         if (code_point == 0) {
-            commit_all(ic);
+            commit_all(ic, state);
             return;
         }
 
-        const auto step = engine_.type(static_cast<char32_t>(code_point));
+        const auto step = state.engine.type(static_cast<char32_t>(code_point));
         if (!step.handled) {
-            commit_all(ic);
+            commit_all(ic, state);
             return;
         }
         if (!step.commit.empty()) {
             ic->commitString(step.commit);
         }
-        update_preedit(ic);
+        update_preedit(ic, state);
         event.filterAndAccept();
     }
 
     void activate(const fcitx::InputMethodEntry& entry, fcitx::InputContextEvent& event) override
     {
         static_cast<void>(entry);
-        static_cast<void>(event);
         reload_settings(true);
-        engine_.discard();
+        if (auto* ic = event.inputContext(); ic != nullptr) {
+            auto& state = state_of(ic);
+            state.engine.discard();
+            update_preedit(ic, state);
+        }
     }
 
     void deactivate(const fcitx::InputMethodEntry& entry,
@@ -228,18 +270,18 @@ public:
     {
         static_cast<void>(entry);
         if (auto* ic = event.inputContext(); ic != nullptr) {
-            commit_all(ic);
+            commit_all(ic, state_of(ic));
         }
-        engine_.discard();
     }
 
     void reset(const fcitx::InputMethodEntry& entry, fcitx::InputContextEvent& event) override
     {
         static_cast<void>(entry);
         if (auto* ic = event.inputContext(); ic != nullptr) {
-            update_preedit(ic);
+            auto& state = state_of(ic);
+            state.engine.discard();
+            update_preedit(ic, state);
         }
-        engine_.discard();
     }
 
     std::string subMode(const fcitx::InputMethodEntry& entry,
@@ -259,42 +301,64 @@ public:
     }
 
 private:
-    void commit_all(fcitx::InputContext* ic)
+    /// Per input context state, with the options brought up to date when the
+    /// configuration changed since the last use.
+    NexKeyState& state_of(fcitx::InputContext* ic)
     {
-        const auto step = engine_.flush();
+        auto* state = ic->propertyFor(&state_factory_);
+        if (state->generation != generation_) {
+            state->generation = generation_;
+            state->engine.set_options(settings_.options);
+        }
+        return *state;
+    }
+
+    void commit_all(fcitx::InputContext* ic, NexKeyState& state)
+    {
+        const auto step = state.engine.flush();
         if (!step.commit.empty()) {
             ic->commitString(step.commit);
         }
-        update_preedit(ic);
+        update_preedit(ic, state);
     }
 
-    void update_preedit(fcitx::InputContext* ic)
+    /// Commit the text of one candidate and end the composition.
+    void commit_candidate(fcitx::InputContext* ic, NexKeyState& state, const std::string& text)
+    {
+        state.engine.discard();
+        if (!text.empty()) {
+            ic->commitString(text);
+        }
+        update_preedit(ic, state);
+    }
+
+    void update_preedit(fcitx::InputContext* ic, NexKeyState& state)
     {
         if (ic == nullptr) {
             return;
         }
-        const std::string preedit(engine_.preedit());
+        const std::string preedit(state.engine.preedit());
         auto& panel = ic->inputPanel();
         if (preedit.empty()) {
             panel.setClientPreedit(fcitx::Text{});
         } else {
             panel.setClientPreedit(fcitx::Text(preedit));
         }
-        update_candidates(ic);
+        update_candidates(ic, state);
         ic->updatePreedit();
     }
 
     /// Publish the alternative interpretations of the current word.
-    void update_candidates(fcitx::InputContext* ic)
+    void update_candidates(fcitx::InputContext* ic, NexKeyState& state)
     {
         auto& panel = ic->inputPanel();
 
-        if (!settings_.options.candidates) {
+        if (!settings_.options.candidates || !state.engine.composing()) {
             panel.setCandidateList(nullptr);
             return;
         }
 
-        const auto alternatives = engine_.candidates();
+        const auto alternatives = state.engine.candidates();
         if (alternatives.size() < 2) {
             panel.setCandidateList(nullptr);
             return;
@@ -305,17 +369,16 @@ private:
         list->setSelectionKey(selection_keys());
 
         for (const auto& alternative : alternatives) {
-            auto word = std::make_unique<NexKeyCandidate>(
+            list->append(std::make_unique<NexKeyCandidate>(
                 alternative.text, alternative.comment, alternative.text,
                 [this, ic, text = alternative.text] {
-                    engine_.discard();
-                    if (!text.empty()) {
-                        ic->commitString(text);
-                    }
-                    update_preedit(ic);
-                });
-            list->append(std::move(word));
+                    commit_candidate(ic, state_of(ic), text);
+                    ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
+                }));
         }
+        // Start on the default entry so that space and the selection keys agree
+        // on what is highlighted.
+        list->setGlobalCursorIndex(0);
         panel.setCandidateList(std::move(list));
     }
 
@@ -329,10 +392,24 @@ private:
         return keys;
     }
 
-    /// Returns true when the key selected a candidate.
-    bool handle_candidate_key(fcitx::InputContext* ic, const fcitx::Key& key)
+    /// Index of a plain or Control prefixed digit, -1 for anything else.
+    static int selection_index(const fcitx::Key& key, bool control_required)
     {
-        if (!engine_.composing()) {
+        const auto symbol = key.sym();
+        if (symbol < FcitxKey_1 || symbol > FcitxKey_9) {
+            return -1;
+        }
+        const bool with_ctrl = key.states().test(fcitx::KeyState::Ctrl);
+        if (with_ctrl != control_required) {
+            return -1;
+        }
+        return static_cast<int>(symbol - FcitxKey_1);
+    }
+
+    /// Returns true when the key belonged to the word selection window.
+    bool handle_candidate_key(fcitx::InputContext* ic, NexKeyState& state, const fcitx::Key& key)
+    {
+        if (!state.engine.composing()) {
             return false;
         }
         const auto list = ic->inputPanel().candidateList();
@@ -340,32 +417,59 @@ private:
             return false;
         }
 
-        const auto symbol = key.sym();
-        if (symbol < FcitxKey_1 || symbol > FcitxKey_9) {
-            return false;
-        }
-
-        // Digits are tone and modifier markers in VNI and literal text in VIQR,
-        // so there they only select a candidate together with Control.
+        // Digits are tone and modifier markers in VNI and VIQR, so there they
+        // only select a candidate together with Control.
         const bool digits_are_text = settings_.options.method == nexkey::Method::Vni ||
                                      settings_.options.method == nexkey::Method::Viqr;
-        const bool with_ctrl = key.states().test(fcitx::KeyState::Ctrl);
-        if (digits_are_text && !with_ctrl) {
-            return false;
+        if (const int index = selection_index(key, digits_are_text); index >= 0) {
+            if (index >= list->size()) {
+                return false;
+            }
+            commit_candidate(ic, state,
+                             static_cast<const NexKeyCandidate&>(list->candidate(index))
+                                 .commit_text());
+            return true;
         }
 
-        const int index = static_cast<int>(symbol - FcitxKey_1);
-        if (index >= list->size()) {
-            return false;
+        const auto symbol = key.sym();
+
+        if (auto* movable = list->toCursorMovable(); movable != nullptr) {
+            if (symbol == FcitxKey_Up) {
+                movable->prevCandidate();
+                ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
+                return true;
+            }
+            if (symbol == FcitxKey_Down) {
+                movable->nextCandidate();
+                ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
+                return true;
+            }
         }
 
-        engine_.discard();
-        const auto text = static_cast<const NexKeyCandidate&>(list->candidate(index)).commit_text();
-        if (!text.empty()) {
-            ic->commitString(text);
+        if (auto* pageable = list->toPageable(); pageable != nullptr) {
+            if (symbol == FcitxKey_Page_Up && pageable->hasPrev()) {
+                pageable->prev();
+                ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
+                return true;
+            }
+            if (symbol == FcitxKey_Page_Down && pageable->hasNext()) {
+                pageable->next();
+                ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
+                return true;
+            }
         }
-        update_preedit(ic);
-        return true;
+
+        // Space takes the highlighted entry; the space itself keeps flowing to
+        // the application, which is why this path reports the key as unused.
+        if (symbol == FcitxKey_space) {
+            const int index = list->cursorIndex();
+            if (index >= 0 && index < list->size()) {
+                commit_candidate(ic, state,
+                                 static_cast<const NexKeyCandidate&>(list->candidate(index))
+                                     .commit_text());
+            }
+        }
+        return false;
     }
 
     bool handle_toggle_key(const fcitx::KeyEvent& event)
@@ -399,11 +503,26 @@ private:
     void toggle_mode()
     {
         settings_.enabled = !settings_.enabled;
-        engine_.discard();
+        ++generation_;
         if (!nexkey::save_settings(settings_)) {
             FCITX_WARN() << "NexKey: cannot write the configuration file";
         }
         config_time_ = std::filesystem::file_time_type{};
+        // Every input context starts over: a composition belongs to the mode
+        // that produced it.
+        instance_->inputContextManager().foreach([this](fcitx::InputContext* ic) {
+            if (auto* property = ic->property(std::string(kPropertyName));
+                property != nullptr) {
+                auto& state = *static_cast<NexKeyState*>(property);
+                state.engine.discard();
+                if (state.generation != generation_) {
+                    state.generation = generation_;
+                    state.engine.set_options(settings_.options);
+                }
+                update_preedit(ic, state);
+            }
+            return true;
+        });
         FCITX_INFO() << "NexKey: switched to " << (settings_.enabled ? "VI" : "EN") << " mode";
     }
 
@@ -426,14 +545,17 @@ private:
         }
 
         settings_ = nexkey::load_settings(path);
-        engine_.set_options(settings_.options);
+        // A reloaded configuration has to reach the input contexts that are
+        // already open, so the generation counter is bumped here as well.
+        ++generation_;
         toggle_ = parse_toggle_key(settings_.toggle_key);
     }
 
     fcitx::Instance* instance_;
-    nexkey::Engine engine_;
     nexkey::Settings settings_;
     ToggleKey toggle_;
+    fcitx::FactoryFor<NexKeyState> state_factory_;
+    unsigned generation_{0};
     std::filesystem::file_time_type config_time_{};
     std::chrono::steady_clock::time_point last_check_{};
 };

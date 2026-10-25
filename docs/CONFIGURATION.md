@@ -96,8 +96,16 @@ Selection keys:
 - Telex and Simple Telex: `1` to `9` pick an entry, because digits have no
   meaning in those methods.
 - VNI and VIQR: digits are tone markers and literal text, so they keep typing
-  and selection uses `Ctrl` plus a digit, or a click in the candidate window.
-- Typing a separator such as space commits the default entry.
+  and selection uses `Ctrl` plus a digit.
+- `Up` and `Down` move the highlight, `Page Up` and `Page Down` turn the page,
+  and `space` takes the highlighted entry and then types the space itself, so a
+  word is never followed by a missing separator.
+- A click in the candidate window picks the entry under the pointer.
+
+The keys that belong to the window are consumed; everything else, including
+`Return`, `Tab` and `Escape`, ends the composition and reaches the application.
+Each window, tab and text field keeps its own composition, so switching between
+two applications never mixes two half typed words.
 
 The window only appears when there is something to choose; a word with a single
 possible reading is committed normally. Turn it off with

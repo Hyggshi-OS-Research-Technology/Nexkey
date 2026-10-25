@@ -66,10 +66,23 @@ new word. `flush` commits the pending composition, `discard` drops it.
 
 `integrations/fcitx5/nexkey.cpp` implements `fcitx::InputMethodEngine`. Key
 events are translated into Unicode code points with `fcitx::Key::keySymToUnicode`
-and forwarded to one `nexkey::Engine` instance per input context. The preedit is
-published through the client preedit, commits go through
+and forwarded to one `nexkey::Engine` instance per input context.
+
+Fcitx 5 keeps several input contexts alive at once (one per window, tab or text
+field) and switches between them without notice, so the composition lives in an
+`fcitx::InputContextProperty` registered as `nexkey-state` rather than in the
+addon: a half typed word can never leak into another window. The shared
+configuration stays in the addon and carries a generation counter; an input
+context picks up new options the next time it is used, and a mode change
+discards the compositions of all open contexts.
+
+The preedit is published through the client preedit, commits go through
 `InputContext::commitString`, and `subMode`/`overrideIcon` provide the VI/EN
-state to the panel.
+state to the panel. The word selection window is an ordinary
+`fcitx::CommonCandidateList`, so the frontend draws it and the user can click an
+entry; the addon intercepts the keys that belong to the list (digits,
+Up/Down, PageUp/PageDown and space) and hands everything else to the word
+parser.
 
 The addon watches the modification time of the configuration file and reloads
 it lazily, at most four times per second, so changes made by the tray
