@@ -202,12 +202,20 @@ jobs:
           test -d /etc/xdg/autostart
           test -f /etc/xdg/autostart/nexkey.desktop \
             || { echo "::error::the maintainer script did not install the autostart entry"; ls -l /etc/xdg/autostart; exit 1; }
+
+          # The installed tree has to look the way Fcitx5 expects it, not only
+          # the archive, so the same rules are checked again in place.
+          scripts/check-install.sh --prefix /usr
+
           sudo apt-get remove -y nexkey
           if [ -e /etc/xdg/autostart/nexkey.desktop ]; then
             echo "::error::the maintainer script did not remove the autostart entry"
             exit 1
           fi
-          scripts/check-install.sh --prefix /usr
+          if [ -e /usr/share/fcitx5/addon/nexkey.conf ]; then
+            echo "::error::the package left its Fcitx5 registration behind"
+            exit 1
+          fi
           echo "the package installs and removes cleanly"
       - uses: actions/upload-artifact@v6
         with:
