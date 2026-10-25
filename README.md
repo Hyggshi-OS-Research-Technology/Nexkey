@@ -42,7 +42,7 @@ settings window. Everything is built, tested and packaged with CMake.
   (`org.nexkey.Daemon`) for scripts and desktop shortcuts.
 - Command line tool to test the engine, convert files between charsets and
   script the configuration.
-- Debian package and AppImage packaging.
+- Debian package and a self contained AppImage, both attached to every CI run.
 
 ## Requirements
 
@@ -63,8 +63,8 @@ Qt and no Fcitx5 still produces the library, the CLI and the test suite.
 ```bash
 ./scripts/build.sh            # Debug build in ./build
 ./scripts/test.sh             # build and run the test suite
-./scripts/package-deb.sh      # CPack Debian package
-./scripts/package-appimage.sh # AppImage with linuxdeploy
+./scripts/package-deb.sh      # CPack Debian package  -> build-deb/*.deb
+./scripts/package-appimage.sh # AppImage with linuxdeploy -> dist/*.AppImage
 ```
 
 Manual build:
@@ -92,6 +92,9 @@ Useful CMake options:
 sudo cmake --install build --prefix /usr
 ```
 
+Alternatively use the AppImage, which carries its own copy of the addon and the
+tray application (see below).
+
 Then open the Fcitx5 configuration, add **NexKey** to the input method list and
 switch to it. The addon reads `~/.config/nexkey/nexkey.conf` and reloads it as
 soon as the tray application or `nexkey config set` rewrites the file.
@@ -104,6 +107,28 @@ nexkey config set ui.toggle_key Ctrl+Shift+space
 ```
 
 The Fcitx5 panel icon shows `VN` in Vietnamese mode and `EN` in English mode.
+
+## AppImage
+
+```bash
+./scripts/package-appimage.sh
+./dist/NexKey-2.0.0-x86_64.AppImage            # tray icon and settings window
+./dist/NexKey-2.0.0-x86_64.AppImage --settings # open the settings window
+```
+
+The script builds a Release tree, installs it into an AppDir without the
+development files, bundles Qt and the Fcitx5 addon with linuxdeploy, and prints
+the size and the SHA-256 of the image. `packaging/appimage/AppRun` sets
+`PATH`, `XDG_DATA_DIRS`, the Qt plugin paths and `FCITX_ADDON_DIRS` at runtime,
+so both the tray application and the bundled addon work straight from the image.
+
+The image is self contained apart from the FUSE runtime: on Ubuntu 24.04
+install `libfuse2t64`, or extract it once with
+`./NexKey-2.0.0-x86_64.AppImage --appimage-extract`.
+
+Both the `.deb` and the `.AppImage` are uploaded as artifacts by CI. See
+[docs/PACKAGING.md](docs/PACKAGING.md) for every option, the file layout and the
+limitations.
 
 ## Command line
 
@@ -155,7 +180,8 @@ scripts/              build, test and packaging helpers
 docs/                 configuration and architecture notes
 ```
 
-More detail is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+More detail is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and
+[docs/PACKAGING.md](docs/PACKAGING.md).
 
 ## Testing
 

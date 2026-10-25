@@ -1,0 +1,134 @@
+# Packaging
+
+NexKey ships two binary formats, both produced from the same build tree:
+
+| Format | Script | Output |
+| --- | --- | --- |
+| Debian package | `scripts/package-deb.sh` | `build-deb/nexkey_<version>_<arch>.deb` |
+| AppImage | `scripts/package-appimage.sh` | `dist/NexKey-<version>-x86_64.AppImage` |
+
+Both are attached to the CI run of every push and pull request as the
+`debian-package` and `appimage` artifacts.
+
+## Debian package
+
+```bash
+./scripts/package-deb.sh
+```
+
+The script configures a Release build with `/usr` as the install prefix and
+calls `cpack`. The package is built with CPack, configured in
+`cmake/NexKeyPackaging.cmake`.
+
+Contents:
+
+```
+/usr/bin/nexkey-gui                            tray application
+/usr/bin/nexkey                                command line tool
+/usr/lib/<triplet>/fcitx5/nexkey.so            Fcitx5 input method addon
+/usr/lib/<triplet>/libnexkey-core.a            static core library
+/usr/include/nexkey/*.hpp                      public headers
+/usr/lib/<triplet>/cmake/NexKey/               CMake package files
+/usr/share/fcitx5/addon/nexkey-addon.conf
+/usr/share/fcitx5/inputmethod/nexkey.conf
+/usr/share/applications/nexkey.desktop
+/usr/share/icons/hicolor/scalable/...
+/usr/share/doc/NexKey/                         README, license, docs
+```
+
+`packaging/debian/postinst` refreshes the desktop, icon and Fcitx5 caches;
+`packaging/debian/postrm` removes the autostart entry.
+
+Runtime dependencies are `libc6` and `libstdc++6`. Add `fcitx5` to get the
+input method working, and `libqt6widgets6`/`libqt6dbus6` for the tray app; the
+package does not force them so a CLI-only install stays small.
+
+## AppImage
+
+```bash
+./scripts/package-appimage.sh
+```
+
+Steps performed by the script:
+
+1. Configure and build a Release tree in `build-appimage/` with `/usr` as the
+   install prefix.
+2. Install into `NexKey.AppDir/` with `DESTDIR`, then delete the development
+   files (`usr/include`, `usr/lib/cmake`, `usr/share/doc`, `*.a`).
+3. Download `linuxdeploy` and `linuxdeploy-plugin-qt` into `.tools/` (once).
+4. Run linuxdeploy with the desktop file, the application icon, the custom
+   `packaging/appimage/AppRun` and the Qt plugin, so Qt itself and the platform
+   plugins are bundled.
+5. Write `dist/NexKey-<version>-x86_64.AppImage` and print its size and SHA-256.
+
+Options:
+
+```
+--build-dir <dir>     build tree to use        (default: build-appimage)
+--output-dir <dir>    where the image is saved (default: dist)
+--skip-build          reuse an existing build tree
+--keep-appdir         do not delete the AppDir afterwards
+--no-qt-plugin        skip the linuxdeploy Qt plugin
+--allow-missing-gui   package without the Qt tray application
+--help                print the help
+```
+
+The script fails early when `nexkey-gui` was not built, because an image with
+only the CLI is rarely what people expect; pass `--allow-missing-gui` to get one
+on purpose. It also fails when `qmake6` is missing while the Qt plugin is
+enabled, which keeps the image from silently shipping without Qt libraries.
+
+### Running the image
+
+```bash
+chmod +x dist/NexKey-2.0.0-x86_64.AppImage
+./dist/NexKey-2.0.0-x86_64.AppImage             # tray icon + settings window
+./dist/NexKey-2.0.0-x86_64.AppImage --settings  # open the settings window
+```
+
+`AppRun` prepares the environment before starting the application:
+
+| Variable | Value |
+| --- | --- |
+| `PATH` | prepends `usr/bin` of the image |
+| `XDG_DATA_DIRS` | prepends `usr/share` of the image |
+| `QT_PLUGIN_PATH`, `QT_QPA_PLATFORM_PLUGIN_PATH` | bundled Qt plugins, when present |
+| `FCITX_ADDON_DIRS` | prepends `usr/lib/fcitx5`, when present |
+
+`FCITX_ADDON_DIRS` is what makes the bundled Fcitx5 addon usable from the
+image: start Fcitx5 from a session where that variable is exported (for example
+from the same shell, or by wrapping your Fcitx5 autostart entry) and the addon
+shows up as an available input method.
+
+The configuration is still read from `$XDG_CONFIG_HOME/nexkey/nexkey.conf`, so
+the AppImage and a distribution package share the same settings.
+
+### Limitations
+
+- AppImages are not signed. Verify the SHA-256 printed by the script against
+  the artifact of the CI run you downloaded.
+- The image targets x86_64 and was tested on Ubuntu 24.04 and Debian 12.
+- Bundling works around the limits of the FUSE runtime with
+  `APPIMAGE_EXTRACT_AND_RUN=1`, which the script sets while linuxdeploy runs.
+  Running the produced image itself needs FUSE (`libfuse2t64` on Ubuntu 24.04)
+  unless you extract it with `--appimage-extract`.
+
+## CI
+
+`.github/workflows/ci.yml` has three jobs:
+
+| Job | What it does |
+| --- | --- |
+| `core` | Builds the library, the CLI and the tests without Qt or Fcitx5, warnings as errors |
+| `full` | Builds everything with Qt6 and Fcitx5, runs the tests, builds and inspects the Debian package |
+| `appimage` | Builds the AppImage, extracts it and checks the layout, the bundled libraries and the CLI |
+
+The AppImage job verifies the image contents before uploading, so a broken
+bundle fails the build instead of reaching users:
+
+```bash
+./NexKey-*.AppImage --appimage-extract
+test -x squashfs-root/usr/bin/nexkey-gui
+test -f squashfs-root/usr/lib/fcitx5/nexkey.so
+./squashfs-root/usr/bin/nexkey methods
+```

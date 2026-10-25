@@ -38,6 +38,7 @@ Makefile
 *.exe
 
 # Packaging output
+dist/
 *.deb
 *.rpm
 *.tar.gz
