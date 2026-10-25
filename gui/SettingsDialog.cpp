@@ -13,6 +13,7 @@
 #include <QFileInfo>
 #include <QFormLayout>
 #include <QGroupBox>
+#include <QIcon>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
@@ -68,6 +69,7 @@ SettingsDialog::SettingsDialog(const nexkey::Settings& settings, QWidget* parent
     , m_settings(settings)
 {
     setWindowTitle(tr("NexKey Settings"));
+    setWindowIcon(QIcon(QStringLiteral(":/icons/nexkey.svg")));
     resize(460, 380);
 
     m_method = new QComboBox(this);

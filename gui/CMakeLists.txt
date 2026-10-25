@@ -2,6 +2,7 @@
 # NexKey - Qt6 tray application build.
 
 set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTORCC ON)
 
 qt_add_executable(nexkey-gui
     main.cpp
@@ -12,6 +13,7 @@ qt_add_executable(nexkey-gui
     SettingsDialog.hpp
     TrayApplication.cpp
     TrayApplication.hpp
+    resources.qrc
 )
 
 target_link_libraries(nexkey-gui PRIVATE
