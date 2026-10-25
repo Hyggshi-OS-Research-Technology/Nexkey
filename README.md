@@ -106,8 +106,9 @@ sudo cmake --install build --prefix /usr
 Alternatively use the AppImage, which carries the Fcitx5 addon and the tray
 application (see below).
 
-**Fcitx5**: open the Fcitx5 configuration, add **NexKey** to the input method
-list and switch to it.
+**Fcitx5**: restart Fcitx5, open `fcitx5-configtool`, add **NexKey** to the
+input method list and switch to it. See [docs/FCITX5.md](docs/FCITX5.md) for the
+step by step instructions and troubleshooting.
 
 **IBus**: run `ibus write-cache --system`, restart IBus, then add **NexKey** in
 `ibus-setup`. See [docs/IBUS.md](docs/IBUS.md) for details and troubleshooting.
@@ -194,11 +195,12 @@ integrations/ibus/    IBus input method engine and component file
 tests/                unit tests with a tiny built-in harness
 packaging/            desktop entry, Debian maintainer scripts
 scripts/              build, test and packaging helpers
-docs/                 configuration and architecture notes
+docs/                 usage, configuration and architecture notes
 ```
 
 More detail is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md),
-[docs/IBUS.md](docs/IBUS.md) and [docs/PACKAGING.md](docs/PACKAGING.md).
+[docs/FCITX5.md](docs/FCITX5.md), [docs/IBUS.md](docs/IBUS.md) and
+[docs/PACKAGING.md](docs/PACKAGING.md).
 
 ## Testing
 
