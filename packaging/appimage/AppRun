@@ -1,4 +1,43 @@
-#!/bin/bash
-HERE="$(dirname "$(readlink -f "$0")")"
-export PATH="$HERE/usr/bin:$PATH"
-exec "$HERE/usr/bin/nexkey-gui" "$@"
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+# NexKey AppImage entry point.
+#
+# linuxdeploy copies this file into the AppDir as AppRun. It points the runtime
+# at the bundled data, Qt plugins and the Fcitx5 addon before starting the tray
+# application. Every path is checked first, so the same file also works for an
+# image that only contains the command line tool.
+
+set -eu
+
+here="$(dirname "$(readlink -f "$0")")"
+
+export PATH="${here}/usr/bin:${PATH}"
+export XDG_DATA_DIRS="${here}/usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+
+if [ -d "${here}/usr/plugins" ]; then
+    export QT_PLUGIN_PATH="${here}/usr/plugins${QT_PLUGIN_PATH:+:${QT_PLUGIN_PATH}}"
+    if [ -d "${here}/usr/plugins/platforms" ]; then
+        export QT_QPA_PLATFORM_PLUGIN_PATH="${here}/usr/plugins/platforms${QT_QPA_PLATFORM_PLUGIN_PATH:+:${QT_QPA_PLATFORM_PLUGIN_PATH}}"
+    fi
+fi
+
+# The addon is bundled, so Fcitx5 can load it straight from the image. The
+# library directory is plain "lib" on some distributions and "lib/<triplet>"
+# on Debian based ones, so both layouts are probed.
+for candidate in "${here}/usr/lib/fcitx5" "${here}"/usr/lib/*/fcitx5; do
+    if [ -d "${candidate}" ]; then
+        export FCITX_ADDON_DIRS="${candidate}${FCITX_ADDON_DIRS:+:${FCITX_ADDON_DIRS}}"
+        break
+    fi
+done
+
+# Keep the user configuration in the home directory, never inside the image.
+if [ -z "${XDG_CONFIG_HOME:-}" ] && [ -n "${HOME:-}" ]; then
+    export XDG_CONFIG_HOME="${HOME}/.config"
+fi
+
+if [ -x "${here}/usr/bin/nexkey-gui" ]; then
+    exec "${here}/usr/bin/nexkey-gui" "$@"
+fi
+
+exec "${here}/usr/bin/nexkey" "$@"

@@ -1,0 +1,299 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  QT_PACKAGES: >-
+    qt6-base-dev
+    qt6-base-dev-tools
+
+jobs:
+  core:
+    name: Core, CLI and tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+             -DNEXKEY_BUILD_GUI=OFF -DNEXKEY_BUILD_FCITX5=OFF
+             -DNEXKEY_WARNINGS_AS_ERRORS=ON
+      - name: Build
+        run: cmake --build build --parallel
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  full:
+    name: Qt6 tray, Fcitx5 addon and Debian package
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build pkg-config dpkg-dev file \
+            ${QT_PACKAGES} libfcitx5core-dev libibus-1.0-dev
+      - name: Configure
+        run: |
+          set -o pipefail
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DNEXKEY_WARNINGS_AS_ERRORS=ON 2>&1 | tee configure.log
+          if grep -Eq "(Qt6|Fcitx5Core|IBus).*not found" configure.log; then
+            echo "::error::a component was skipped: $(grep -E '(Qt6|Fcitx5Core|IBus).*not found' configure.log | head -1)"
+            exit 1
+          fi
+      - name: Build
+        run: |
+          set -o pipefail
+          if ! cmake --build build --parallel 2>&1 | tee build.log; then
+            grep -E "error:" build.log | head -20 | while IFS= read -r line; do
+              echo "::error title=Compiler error::$line"
+            done
+            exit 1
+          fi
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+      - name: Check the input method backends
+        run: |
+          set -e
+          backends=0
+          if [ ! -x build/integrations/ibus/nexkey-ibus ]; then
+            echo "::error::the IBus engine was not built"
+            ls -R build/integrations 2>&1 | head -40
+            grep -iE "ibus|pkg.?config" build/CMakeCache.txt | head -20
+            backends=1
+          fi
+          if [ ! -f build/integrations/fcitx5/nexkey.so ]; then
+            echo "::error::the Fcitx5 addon was not built"
+            backends=1
+          fi
+          if [ "$backends" -ne 0 ]; then
+            exit 1
+          fi
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          root = ET.parse("build/integrations/ibus/nexkey.xml").getroot()
+          engine = root.find("engines/engine")
+          assert root.findtext("name") == "org.freedesktop.IBus.NexKey"
+          assert engine.findtext("name") == "nexkey"
+          assert root.findtext("exec").endswith("/nexkey/nexkey-ibus")
+          print("component xml exec:", root.findtext("exec"))
+          PY
+          # Without a running IBus daemon the engine must fail cleanly
+          # instead of hanging or crashing.
+          set +e
+          timeout 15 build/integrations/ibus/nexkey-ibus > ibus.log 2>&1
+          code=$?
+          set -e
+          echo "engine exit code: $code"
+          cat ibus.log || true
+          if [ "$code" -eq 0 ]; then
+            echo "::error::the engine started without an IBus daemon"
+            exit 1
+          fi
+          if [ "$code" -eq 124 ]; then
+            echo "::error::the engine hangs without an IBus daemon"
+            exit 1
+          fi
+      - name: Build the Debian package
+        run: cmake --build build --target package
+      - name: Inspect the package
+        run: |
+          set -e
+          dpkg-deb --info build/*.deb
+          contents="$(dpkg-deb --contents build/*.deb)"
+
+          require_path() {
+            if ! printf '%s\n' "$contents" | grep -Eq "$1"; then
+              echo "::error::the package is missing a file matching: $1"
+              printf '%s\n' "$contents" | head -60
+              exit 1
+            fi
+          }
+          require_path 'usr/bin/nexkey-gui'
+          require_path 'fcitx5/nexkey\.so'
+          require_path 'usr/share/fcitx5/addon/nexkey\.conf'
+          require_path 'usr/share/fcitx5/inputmethod/nexkey\.conf'
+          require_path 'usr/share/applications/nexkey\.desktop'
+          require_path 'usr/share/nexkey/nexkey-autostart\.desktop'
+          require_path 'usr/lib/([^/]+/)?nexkey/nexkey-ibus'
+          require_path 'usr/share/ibus/component/nexkey\.xml'
+
+          depends="$(dpkg-deb --field build/*.deb Depends)"
+          echo "Depends: $depends"
+          printf '%s' "$depends" | grep -Eq 'libqt6core6' \
+            || { echo "::error::the Qt6 runtime dependency is missing"; exit 1; }
+          printf '%s' "$depends" | grep -Eq 'libfcitx5core' \
+            || { echo "::error::the Fcitx5 runtime dependency is missing"; exit 1; }
+          printf '%s' "$depends" | grep -Eq 'libibus-1\.0-5' \
+            || { echo "::error::the IBus runtime dependency is missing"; exit 1; }
+
+          # The 64 bit time_t transition renamed these libraries, so a package
+          # that names only one spelling is uninstallable on half of the
+          # distributions. Both have to be offered as alternatives.
+          for pair in 'libqt6core6t64 | libqt6core6' \
+                      'libqt6gui6t64 | libqt6gui6' \
+                      'libqt6widgets6t64 | libqt6widgets6' \
+                      'libqt6dbus6t64 | libqt6dbus6' \
+                      'libfcitx5core7 | libfcitx5core0'; do
+            if ! printf '%s' "$depends" | grep -qF "$pair"; then
+              echo "::error::the dependency list is not portable, missing: $pair"
+              exit 1
+            fi
+          done
+          dpkg-deb --field build/*.deb Recommends | grep -q fcitx5 \
+            || { echo "::error::fcitx5 is not a recommended package"; exit 1; }
+
+          extract="$(mktemp -d)"
+          dpkg-deb --extract build/*.deb "$extract"
+          test -x "$extract/usr/bin/nexkey-gui"
+          test -x "$extract/usr/bin/nexkey"
+          "$extract/usr/bin/nexkey" methods | grep -q telex
+
+          # Fcitx5 derives the addon name from the file name in addon/ and
+          # drops an input method entry whose Addon key does not name one of
+          # them, so the two have to agree inside the package.
+          python3 - "$extract" <<'PY'
+          import configparser
+          import pathlib
+          import sys
+
+          root = pathlib.Path(sys.argv[1])
+          addon_dir = root / "usr/share/fcitx5/addon"
+          entry_dir = root / "usr/share/fcitx5/inputmethod"
+          addons = {path.stem for path in addon_dir.glob("*.conf")}
+          print("addons:", ", ".join(sorted(addons)) or "none")
+          entries = list(entry_dir.glob("*.conf"))
+          assert entries, "no input method entry was packaged"
+          for entry in entries:
+              parser = configparser.ConfigParser()
+              parser.read(entry)
+              addon = parser.get("InputMethod", "Addon", fallback="")
+              assert addon, f"{entry.name} has no Addon key"
+              assert addon in addons, (
+                  f"{entry.name} points at the addon '{addon}' but the package only "
+                  f"registers {sorted(addons)}; Fcitx5 would drop the entry"
+              )
+              assert parser.get("InputMethod", "Name", fallback=""), f"{entry.name} has no Name key"
+              print(f"{entry.name} -> addon {addon}")
+          PY
+
+          # The component file registers the engine by absolute path, so the
+          # path it names has to exist inside the package.
+          engine="$(python3 -c "import xml.etree.ElementTree as ET; print(ET.parse('$extract/usr/share/ibus/component/nexkey.xml').getroot().findtext('exec'))")"
+          echo "IBus engine path: $engine"
+          if [ ! -x "$extract$engine" ]; then
+            echo "::error::the IBus component points to $engine, which is not in the package"
+            find "$extract" -name 'nexkey-ibus' || true
+            exit 1
+          fi
+      - name: Install and remove the package
+        run: |
+          set -e
+          sudo apt-get install -y --no-install-recommends ./build/*.deb
+          dpkg -s nexkey | grep -q '^Status: install ok installed'
+          nexkey version
+          nexkey test "tieengs"
+          test -f /usr/share/fcitx5/addon/nexkey.conf
+          test -f /usr/share/fcitx5/inputmethod/nexkey.conf
+          test -f /usr/share/ibus/component/nexkey.xml
+          test -d /etc/xdg/autostart
+          test -f /etc/xdg/autostart/nexkey.desktop \
+            || { echo "::error::the maintainer script did not install the autostart entry"; ls -l /etc/xdg/autostart; exit 1; }
+
+          # The installed tree has to look the way Fcitx5 expects it, not only
+          # the archive, so the same rules are checked again in place.
+          scripts/check-install.sh --prefix /usr
+
+          sudo apt-get remove -y nexkey
+          if [ -e /etc/xdg/autostart/nexkey.desktop ]; then
+            echo "::error::the maintainer script did not remove the autostart entry"
+            exit 1
+          fi
+          if [ -e /usr/share/fcitx5/addon/nexkey.conf ]; then
+            echo "::error::the package left its Fcitx5 registration behind"
+            exit 1
+          fi
+          echo "the package installs and removes cleanly"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: debian-package
+          path: build/*.deb
+          if-no-files-found: error
+
+  appimage:
+    name: AppImage
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build ${QT_PACKAGES} libfcitx5core-dev libibus-1.0-dev
+      - name: Build the AppImage
+        run: ./scripts/package-appimage.sh --output-dir dist
+      - name: Verify the image contents
+        run: |
+          cd dist
+          ./NexKey-*.AppImage --appimage-extract > /dev/null
+          root=squashfs-root
+          fail=0
+
+          report() {
+            echo "::error::$*"
+            fail=1
+          }
+
+          require_exec() {
+            if [ ! -x "$1" ]; then
+              report "missing executable: $1"
+            fi
+          }
+
+          require_file() {
+            if [ ! -f "$1" ]; then
+              report "missing file: $1 (dir: $(ls -A "$(dirname "$1")" 2>&1 | tr '\n' ' '))"
+            fi
+          }
+
+          require_exec "$root/AppRun"
+          require_exec "$root/usr/bin/nexkey-gui"
+          require_exec "$root/usr/bin/nexkey"
+          require_file "$root/usr/share/applications/nexkey.desktop"
+
+          addon="$(find "$root/usr/lib" -name 'nexkey.so' -path '*fcitx5*' 2>/dev/null | head -1)"
+          if [ -z "$addon" ]; then
+            report "the Fcitx5 addon is missing (usr/lib: $(ls -A "$root/usr/lib" 2>&1 | tr '\n' ' '))"
+          fi
+
+          if [ -d "$root/usr/include" ]; then
+            report "development headers leaked into the image"
+          fi
+
+          size="$(stat -c %s NexKey-*.AppImage)"
+          if [ "$size" -lt 5000000 ]; then
+            report "the image looks too small: $size bytes"
+          fi
+
+          methods="$(./$root/usr/bin/nexkey methods 2>&1)" || true
+          if ! printf '%s' "$methods" | grep -q telex; then
+            report "the bundled CLI does not run: $methods"
+          fi
+
+          if ldd "$root/usr/bin/nexkey-gui" 2>&1 | grep -q "not found"; then
+            report "unresolved libraries: $(ldd "$root/usr/bin/nexkey-gui" | grep 'not found' | tr '\n' ' ')"
+          fi
+
+          if [ "$fail" -ne 0 ]; then
+            exit 1
+          fi
+          echo "image verified"
+          sha256sum NexKey-*.AppImage
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: appimage
+          path: dist/*.AppImage
+          if-no-files-found: error

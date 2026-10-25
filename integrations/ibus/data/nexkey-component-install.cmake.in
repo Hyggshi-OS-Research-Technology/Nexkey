@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: MIT
+# Runs at install time, once the real installation prefix is known: IBus reads
+# the engine location from the component file, so the file has to name the
+# directory the binary was installed into (the packaging prefix /usr, or the
+# prefix given to "cmake --install").
+
+set(_nexkey_component "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/@NEXKEY_IBUS_COMPONENT_REL@")
+set(_nexkey_engine "${CMAKE_INSTALL_PREFIX}/@NEXKEY_IBUS_ENGINE_REL@")
+
+if(EXISTS "${_nexkey_component}")
+    file(READ "${_nexkey_component}" _nexkey_contents)
+    string(REGEX REPLACE "<exec>[^<]*</exec>"
+        "<exec>${_nexkey_engine}</exec>" _nexkey_contents "${_nexkey_contents}")
+    file(WRITE "${_nexkey_component}" "${_nexkey_contents}")
+    message(STATUS "NexKey: IBus component exec set to ${_nexkey_engine}")
+else()
+    message(WARNING "NexKey: ${_nexkey_component} is missing, IBus cannot start the engine")
+endif()

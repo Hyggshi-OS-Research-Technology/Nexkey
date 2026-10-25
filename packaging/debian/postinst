@@ -1,0 +1,36 @@
+#!/bin/sh
+# Prepare the autostart entry and refresh the caches.
+set -e
+
+if [ -f /usr/share/nexkey/nexkey-autostart.desktop ]; then
+    install -D -m 0644 /usr/share/nexkey/nexkey-autostart.desktop \
+        /etc/xdg/autostart/nexkey.desktop
+fi
+
+if command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database -q /usr/share/applications >/dev/null 2>&1 || true
+fi
+
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+    gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor >/dev/null 2>&1 || true
+fi
+
+if command -v fcitx5-remote >/dev/null 2>&1; then
+    fcitx5-remote -r >/dev/null 2>&1 || true
+fi
+
+# Refresh the IBus component cache so the engine is listed immediately.
+if command -v ibus >/dev/null 2>&1; then
+    ibus write-cache --system >/dev/null 2>&1 || true
+fi
+
+cat <<'MESSAGE'
+NexKey installed.
+
+Next steps:
+  1. Add "NexKey" to the input method list of Fcitx5 or IBus.
+  2. The tray icon starts with your next session. Turn it off in
+     Settings -> Interface -> "Start automatically when I sign in".
+MESSAGE
+
+exit 0
