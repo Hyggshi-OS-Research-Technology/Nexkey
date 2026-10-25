@@ -1,42 +1,43 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+# NexKey - build a self contained AppImage with linuxdeploy.
+set -euo pipefail
 
-BUILD_DIR="build-appimage"
-APPDIR="NexKey.AppDir"
-APPIMAGE_DESKTOP="$BUILD_DIR/nexkey-appimage.desktop"
-LINUXDEPLOY="./linuxdeploy-x86_64.AppImage"
-LINUXDEPLOY_QT_PLUGIN="./linuxdeploy-plugin-qt-x86_64.AppImage"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+build_dir="${root}/build-appimage"
+appdir="${root}/NexKey.AppDir"
+tools="${root}/.tools"
 
-cmake -S . -B "$BUILD_DIR" -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_BUILD_TYPE=Release
-cmake --build "$BUILD_DIR" --parallel "$(nproc)"
-DESTDIR="$(pwd)/$APPDIR" cmake --install "$BUILD_DIR"
+cmake -S "${root}" -B "${build_dir}" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DNEXKEY_BUILD_TESTS=OFF
+cmake --build "${build_dir}" --parallel "$(nproc 2>/dev/null || echo 2)"
+DESTDIR="${appdir}" cmake --install "${build_dir}"
 
-QT_PLUGINS_DIR="$(qmake6 -query QT_INSTALL_PLUGINS 2>/dev/null || qmake -query QT_INSTALL_PLUGINS 2>/dev/null || true)"
-if [ -n "$QT_PLUGINS_DIR" ] && [ -f "$QT_PLUGINS_DIR/platforms/libqwayland.so" ]; then
-    mkdir -p "$APPDIR/usr/plugins/platforms"
-    cp "$QT_PLUGINS_DIR/platforms/libqwayland.so" "$APPDIR/usr/plugins/platforms/"
+mkdir -p "${tools}"
+linuxdeploy="${tools}/linuxdeploy-x86_64.AppImage"
+plugin="${tools}/linuxdeploy-plugin-qt-x86_64.AppImage"
+
+if [ ! -f "${linuxdeploy}" ]; then
+    curl -fL -o "${linuxdeploy}" \
+        https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+fi
+if [ ! -f "${plugin}" ]; then
+    curl -fL -o "${plugin}" \
+        https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
 fi
 
-cp packaging/nexkey.desktop "$APPIMAGE_DESKTOP"
-sed -i 's/^Icon=.*/Icon=nexkey-vi/' "$APPIMAGE_DESKTOP"
+chmod +x "${linuxdeploy}" "${plugin}"
 
-if [ ! -f "$LINUXDEPLOY" ]; then
-    wget -q -O "$LINUXDEPLOY" https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-fi
+export APPIMAGE_EXTRACT_AND_RUN=1
+export QMAKE="${QMAKE:-$(command -v qmake6 || command -v qmake)}"
 
-if [ ! -f "$LINUXDEPLOY_QT_PLUGIN" ]; then
-    wget -q -O "$LINUXDEPLOY_QT_PLUGIN" https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
-fi
-
-chmod +x "$LINUXDEPLOY" "$LINUXDEPLOY_QT_PLUGIN"
-
-APPIMAGE_EXTRACT_AND_RUN=1 \
-QMAKE="$(command -v qmake6 || command -v qmake)" \
-"$LINUXDEPLOY" \
-    --appdir "$APPDIR" \
-    --desktop-file "$APPIMAGE_DESKTOP" \
-    --icon-file nexkey-gui/resources/icons/nexkey-vi.svg \
+"${linuxdeploy}" \
+    --appdir "${appdir}" \
+    --desktop-file "${appdir}/usr/share/applications/nexkey.desktop" \
+    --icon-file "${root}/gui/icons/nexkey.svg" \
     --plugin qt \
     --output appimage
 
-echo "AppImage built."
+printf '\nAppImage written to %s\n' "${root}"
+ls -1 "${root}"/*.AppImage 2>/dev/null || true

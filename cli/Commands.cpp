@@ -1,0 +1,361 @@
+// SPDX-License-Identifier: MIT
+// NexKey - command implementations.
+
+#include "Cli.hpp"
+
+#include "nexkey/Converter.hpp"
+#include "nexkey/Engine.hpp"
+#include "nexkey/Settings.hpp"
+#include "nexkey/Types.hpp"
+
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <sstream>
+#include <string_view>
+
+namespace nexkey::cli {
+
+namespace {
+
+std::string read_stream(std::istream& in)
+{
+    std::ostringstream buffer;
+    buffer << in.rdbuf();
+    return buffer.str();
+}
+
+std::string join(const Args& args)
+{
+    std::string out;
+    for (const auto& value : args) {
+        if (!out.empty()) {
+            out.push_back(' ');
+        }
+        out += value;
+    }
+    return out;
+}
+
+std::string_view bool_text(bool value)
+{
+    return value ? "true" : "false";
+}
+
+void print_settings(std::ostream& out, const Settings& settings)
+{
+    out << "mode=" << (settings.enabled ? "VI" : "EN") << '\n'
+        << "enabled=" << bool_text(settings.enabled) << '\n'
+        << "method=" << to_string(settings.options.method) << '\n'
+        << "encoding=" << to_string(settings.options.encoding) << '\n'
+        << "tone_style=" << to_string(settings.options.tone_style) << '\n'
+        << "smart_backspace=" << bool_text(settings.options.smart_backspace) << '\n'
+        << "english_fallback=" << bool_text(settings.options.english_fallback) << '\n'
+        << "bracket_shortcuts=" << bool_text(settings.options.bracket_shortcuts) << '\n'
+        << "toggle_key=" << settings.toggle_key << '\n'
+        << "show_tray_icon=" << bool_text(settings.show_tray_icon) << '\n'
+        << "start_with_system=" << bool_text(settings.start_with_system) << '\n'
+        << "config=" << default_config_path().string() << '\n';
+}
+
+std::optional<std::string> config_value(const Settings& settings, std::string_view key)
+{
+    if (key == "input.method") {
+        return std::string(to_string(settings.options.method));
+    }
+    if (key == "input.tone_style") {
+        return std::string(to_string(settings.options.tone_style));
+    }
+    if (key == "input.enabled") {
+        return std::string(bool_text(settings.enabled));
+    }
+    if (key == "output.encoding") {
+        return std::string(to_string(settings.options.encoding));
+    }
+    if (key == "engine.smart_backspace") {
+        return std::string(bool_text(settings.options.smart_backspace));
+    }
+    if (key == "engine.english_fallback") {
+        return std::string(bool_text(settings.options.english_fallback));
+    }
+    if (key == "engine.bracket_shortcuts") {
+        return std::string(bool_text(settings.options.bracket_shortcuts));
+    }
+    if (key == "ui.toggle_key") {
+        return settings.toggle_key;
+    }
+    if (key == "ui.show_tray_icon") {
+        return std::string(bool_text(settings.show_tray_icon));
+    }
+    if (key == "ui.start_with_system") {
+        return std::string(bool_text(settings.start_with_system));
+    }
+    return std::nullopt;
+}
+
+bool parse_bool_value(std::string_view text, bool& out)
+{
+    if (text == "true" || text == "yes" || text == "1" || text == "on") {
+        out = true;
+        return true;
+    }
+    if (text == "false" || text == "no" || text == "0" || text == "off") {
+        out = false;
+        return true;
+    }
+    return false;
+}
+
+bool apply_config(Settings& settings, std::string_view key, std::string_view value)
+{
+    if (key == "input.method") {
+        const auto method = method_from_string(value);
+        if (!method) {
+            return false;
+        }
+        settings.options.method = *method;
+        return true;
+    }
+    if (key == "input.tone_style") {
+        const auto style = tone_style_from_string(value);
+        if (!style) {
+            return false;
+        }
+        settings.options.tone_style = *style;
+        return true;
+    }
+    if (key == "output.encoding") {
+        const auto encoding = encoding_from_string(value);
+        if (!encoding) {
+            return false;
+        }
+        settings.options.encoding = *encoding;
+        return true;
+    }
+    if (key == "ui.toggle_key") {
+        settings.toggle_key = std::string(value);
+        return true;
+    }
+    bool flag = false;
+    if (!parse_bool_value(value, flag)) {
+        return false;
+    }
+    if (key == "input.enabled") {
+        settings.enabled = flag;
+    } else if (key == "engine.smart_backspace") {
+        settings.options.smart_backspace = flag;
+    } else if (key == "engine.english_fallback") {
+        settings.options.english_fallback = flag;
+    } else if (key == "engine.bracket_shortcuts") {
+        settings.options.bracket_shortcuts = flag;
+    } else if (key == "ui.show_tray_icon") {
+        settings.show_tray_icon = flag;
+    } else if (key == "ui.start_with_system") {
+        settings.start_with_system = flag;
+    } else {
+        return false;
+    }
+    return true;
+}
+
+std::string compose_line(const std::string& line, const Options& options, bool trace,
+                         std::ostream& trace_out)
+{
+    Engine engine(options);
+    std::string out;
+    std::size_t index = 0;
+    for (const char key : line) {
+        const auto step = engine.type(key);
+        out += step.commit;
+        ++index;
+        if (trace) {
+            trace_out << "  " << index << ": '" << key << "' -> [" << engine.preedit() << "]\n";
+        }
+    }
+    out += engine.flush().commit;
+    return out;
+}
+
+} // namespace
+
+int run_test(const Args& args)
+{
+    const OptionParser parser(args, {"method", "encoding", "tone-style"});
+    if (!parser.unknown().empty()) {
+        std::cerr << "nexkey: unknown option " << parser.unknown().front() << '\n';
+        return 2;
+    }
+
+    auto options = load_settings().options;
+    if (const auto value = parser.value("method")) {
+        const auto method = method_from_string(*value);
+        if (!method) {
+            std::cerr << "nexkey: unknown input method " << *value << '\n';
+            return 2;
+        }
+        options.method = *method;
+    }
+    if (const auto value = parser.value("encoding")) {
+        const auto encoding = encoding_from_string(*value);
+        if (!encoding) {
+            std::cerr << "nexkey: unknown character set " << *value << '\n';
+            return 2;
+        }
+        options.encoding = *encoding;
+    }
+    if (const auto value = parser.value("tone-style")) {
+        const auto style = tone_style_from_string(*value);
+        if (!style) {
+            std::cerr << "nexkey: unknown tone style " << *value << '\n';
+            return 2;
+        }
+        options.tone_style = *style;
+    }
+    if (parser.has("no-fallback")) {
+        options.english_fallback = false;
+    }
+    if (parser.has("no-brackets")) {
+        options.bracket_shortcuts = false;
+    }
+    if (parser.has("no-smart-backspace")) {
+        options.smart_backspace = false;
+    }
+
+    const bool trace = parser.has("trace");
+    Args lines;
+    if (!parser.positional().empty()) {
+        lines.push_back(join(parser.positional()));
+    } else {
+        std::istringstream input(read_stream(std::cin));
+        std::string line;
+        while (std::getline(input, line)) {
+            lines.push_back(line);
+        }
+    }
+
+    for (const auto& line : lines) {
+        std::cout << compose_line(line, options, trace, std::cout) << '\n';
+    }
+    return 0;
+}
+
+int run_convert(const Args& args)
+{
+    const OptionParser parser(args, {"from", "to", "input", "output"});
+    if (!parser.unknown().empty()) {
+        std::cerr << "nexkey: unknown option " << parser.unknown().front() << '\n';
+        return 2;
+    }
+
+    const auto from_name = parser.value("from");
+    const auto to_name = parser.value("to");
+    if (!from_name || !to_name) {
+        std::cerr << "nexkey: convert needs --from and --to\n";
+        return 2;
+    }
+    const auto from = encoding_from_string(*from_name);
+    const auto to = encoding_from_string(*to_name);
+    if (!from || !to) {
+        std::cerr << "nexkey: unknown character set\n";
+        return 2;
+    }
+
+    std::string input;
+    if (const auto path = parser.value("input")) {
+        std::ifstream file(*path, std::ios::binary);
+        if (!file) {
+            std::cerr << "nexkey: cannot read " << *path << '\n';
+            return 1;
+        }
+        input = read_stream(file);
+    } else {
+        input = read_stream(std::cin);
+    }
+
+    const auto converted = Converter::convert(input, *from, *to);
+    if (const auto path = parser.value("output")) {
+        std::ofstream file(*path, std::ios::binary);
+        if (!file) {
+            std::cerr << "nexkey: cannot write " << *path << '\n';
+            return 1;
+        }
+        file << converted;
+        return file.good() ? 0 : 1;
+    }
+    std::cout << converted;
+    return 0;
+}
+
+int run_config(const Args& args)
+{
+    const OptionParser parser(args, {});
+    const auto& positional = parser.positional();
+    const auto command = positional.empty() ? std::string("show") : positional.front();
+
+    if (command == "path") {
+        std::cout << default_config_path().string() << '\n';
+        return 0;
+    }
+
+    if (command == "show") {
+        print_settings(std::cout, load_settings());
+        return 0;
+    }
+
+    if (command == "get") {
+        if (positional.size() < 2) {
+            std::cerr << "nexkey: config get needs a key\n";
+            return 2;
+        }
+        const auto value = config_value(load_settings(), positional[1]);
+        if (!value) {
+            std::cerr << "nexkey: unknown key " << positional[1] << '\n';
+            return 2;
+        }
+        std::cout << *value << '\n';
+        return 0;
+    }
+
+    if (command == "set") {
+        if (positional.size() < 3) {
+            std::cerr << "nexkey: config set needs a key and a value\n";
+            return 2;
+        }
+        auto settings = load_settings();
+        if (!apply_config(settings, positional[1], positional[2])) {
+            std::cerr << "nexkey: invalid value for " << positional[1] << '\n';
+            return 2;
+        }
+        if (!save_settings(settings)) {
+            std::cerr << "nexkey: cannot write " << default_config_path().string() << '\n';
+            return 1;
+        }
+        std::cout << positional[1] << '=' << *config_value(settings, positional[1]) << '\n';
+        return 0;
+    }
+
+    std::cerr << "nexkey: unknown config command " << command << '\n';
+    return 2;
+}
+
+int run_status(const Args& args)
+{
+    static_cast<void>(args);
+    print_settings(std::cout, load_settings());
+    return 0;
+}
+
+int run_toggle(const Args& args)
+{
+    static_cast<void>(args);
+    auto settings = load_settings();
+    settings.enabled = !settings.enabled;
+    if (!save_settings(settings)) {
+        std::cerr << "nexkey: cannot write " << default_config_path().string() << '\n';
+        return 1;
+    }
+    std::cout << "mode=" << (settings.enabled ? "VI" : "EN") << '\n';
+    return 0;
+}
+
+} // namespace nexkey::cli

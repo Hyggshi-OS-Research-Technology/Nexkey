@@ -1,10 +1,11 @@
 [Desktop Entry]
+Type=Application
 Name=NexKey
 GenericName=Vietnamese Input Method
-Comment=Bo go tieng Viet cho Linux
+Comment=Type Vietnamese on Linux with Telex, VNI or VIQR
 Exec=nexkey-gui
 Icon=nexkey
-Type=Application
-Categories=Utility;
-Keywords=Vietnamese;input;IME;tieng Viet;
+Terminal=false
+Categories=Utility;Settings;
+Keywords=Vietnamese;IME;Telex;VNI;VIQR;Unikey;
 StartupNotify=false

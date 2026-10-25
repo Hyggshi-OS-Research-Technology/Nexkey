@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: MIT
+# NexKey - Qt6 tray application build.
+
+set(CMAKE_AUTOMOC ON)
+
+qt_add_executable(nexkey-gui
+    main.cpp
+    QtHelpers.hpp
+    Daemon.cpp
+    Daemon.hpp
+    SettingsDialog.cpp
+    SettingsDialog.hpp
+    TrayApplication.cpp
+    TrayApplication.hpp
+)
+
+target_link_libraries(nexkey-gui PRIVATE
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    Qt6::DBus
+    NexKey::Core
+)
+
+nexkey_configure_target(nexkey-gui)
+
+install(TARGETS nexkey-gui RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

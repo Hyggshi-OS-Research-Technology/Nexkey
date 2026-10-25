@@ -1,58 +1,59 @@
-cmake_minimum_required(VERSION 3.26)
-project(NexKey VERSION 1.0.0 LANGUAGES CXX)
+cmake_minimum_required(VERSION 3.21)
 
-set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+project(NexKey
+    VERSION 2.0.0
+    DESCRIPTION "Vietnamese input method for Linux"
+    HOMEPAGE_URL "https://github.com/Hyggshi-OS-Research-Technology/Nexkey"
+    LANGUAGES CXX
+)
 
-option(BUILD_IBUS "Build IBus engine backend" ON)
-option(BUILD_FCITX5 "Build Fcitx5 engine backend" ON)
-option(BUILD_GUI "Build Qt6 tray/settings GUI" ON)
-option(BUILD_CLI "Build nexkey-cli tool" ON)
-option(BUILD_TESTS "Build unit tests" ON)
-
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+include(NexKeyHelpers)
 include(GNUInstallDirs)
 
-add_subdirectory(libvkcore)
+set(NEXKEY_CXX_STANDARD 23 CACHE STRING "C++ standard used to build NexKey (23 or 26)")
+set_property(CACHE NEXKEY_CXX_STANDARD PROPERTY STRINGS 23 26)
 
-find_package(PkgConfig QUIET)
-
-if(BUILD_IBUS)
-    if(PkgConfig_FOUND)
-        pkg_check_modules(IBUS QUIET ibus-1.0)
-    endif()
-    if(IBUS_FOUND)
-        add_subdirectory(nexkey-ibus)
-    else()
-        message(WARNING "IBus development files not found; nexkey-ibus will be skipped")
-    endif()
+if(NOT "cxx_std_${NEXKEY_CXX_STANDARD}" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
+    message(FATAL_ERROR
+        "The compiler does not support C++${NEXKEY_CXX_STANDARD}. "
+        "Use a newer compiler or pass -DNEXKEY_CXX_STANDARD=23.")
 endif()
 
-if(BUILD_FCITX5)
-    find_package(Fcitx5Core QUIET)
-    if(Fcitx5Core_FOUND)
-        add_subdirectory(nexkey-fcitx5)
-    else()
-        message(WARNING "Fcitx5Core not found; nexkey-fcitx5 will be skipped")
-    endif()
+option(NEXKEY_BUILD_CLI "Build the nexkey command line tool" ON)
+option(NEXKEY_BUILD_TESTS "Build and register the unit tests" ON)
+option(NEXKEY_BUILD_GUI "Build the Qt6 tray application" ON)
+option(NEXKEY_BUILD_FCITX5 "Build the Fcitx5 input method addon" ON)
+option(NEXKEY_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
+option(NEXKEY_INSTALL_DOCS "Install documentation and license files" ON)
+
+add_subdirectory(core)
+
+if(NEXKEY_BUILD_CLI)
+    add_subdirectory(cli)
 endif()
 
-if(BUILD_GUI)
-    find_package(Qt6 6.5 QUIET COMPONENTS Core Widgets DBus)
+if(NEXKEY_BUILD_GUI)
+    find_package(Qt6 6.4 QUIET COMPONENTS Core Gui Widgets DBus)
     if(Qt6_FOUND)
-        add_subdirectory(nexkey-gui)
+        add_subdirectory(gui)
     else()
-        message(WARNING "Qt6 Core/Widgets/DBus not found; nexkey-gui will be skipped")
+        message(WARNING "Qt6 (Core, Gui, Widgets, DBus) not found: the tray application is skipped")
     endif()
 endif()
 
-if(BUILD_CLI)
-    add_subdirectory(nexkey-cli)
+if(NEXKEY_BUILD_FCITX5)
+    find_package(Fcitx5Core 5.0 QUIET)
+    if(Fcitx5Core_FOUND)
+        add_subdirectory(integrations/fcitx5)
+    else()
+        message(WARNING "Fcitx5Core not found: the Fcitx5 addon is skipped")
+    endif()
 endif()
 
-if(BUILD_TESTS)
+if(NEXKEY_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()
 
-include(cmake/Packaging.cmake)
+include(NexKeyPackaging)
