@@ -513,9 +513,11 @@ int main(int argc, char** argv)
     ibus_init();
 
     IBusBus* bus = ibus_bus_new();
-    if (ibus_bus_is_connected(bus) == FALSE) {
+    if (bus == nullptr || ibus_bus_is_connected(bus) == FALSE) {
         g_printerr("NexKey: cannot connect to the IBus daemon\n");
-        g_object_unref(bus);
+        if (bus != nullptr) {
+            g_object_unref(bus);
+        }
         return 1;
     }
     g_object_ref_sink(bus);

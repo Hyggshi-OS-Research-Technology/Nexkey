@@ -20,16 +20,17 @@ The script configures a Release build with `/usr` as the install prefix and
 calls `cpack`. The package is built with CPack, configured in
 `cmake/NexKeyPackaging.cmake`.
 
-Contents:
+Contents (`<libdir>` is `lib` or the multiarch directory `lib/<triplet>`,
+depending on the prefix CMake was configured with):
 
 ```
 /usr/bin/nexkey-gui                            tray application
 /usr/bin/nexkey                                command line tool
-/usr/lib/<triplet>/fcitx5/nexkey.so            Fcitx5 input method addon
-/usr/lib/<triplet>/nexkey/nexkey-ibus          IBus input method engine
-/usr/lib/<triplet>/libnexkey-core.a            static core library
+/usr/lib/<libdir>/fcitx5/nexkey.so             Fcitx5 input method addon
+/usr/lib/<libdir>/nexkey/nexkey-ibus           IBus input method engine
+/usr/lib/<libdir>/libnexkey-core.a             static core library
 /usr/include/nexkey/*.hpp                      public headers
-/usr/lib/<triplet>/cmake/NexKey/               CMake package files
+/usr/lib/<libdir>/cmake/NexKey/                CMake package files
 /usr/share/fcitx5/addon/nexkey-addon.conf
 /usr/share/fcitx5/inputmethod/nexkey.conf
 /usr/share/ibus/component/nexkey.xml           IBus component description
@@ -39,6 +40,10 @@ Contents:
 /usr/share/doc/NexKey/                         README, license, docs
 /etc/xdg/autostart/nexkey.desktop              created by postinst, removed by postrm
 ```
+
+IBus reads the engine location from `nexkey.xml`, so the installed copy is
+rewritten at install time to the prefix the package really uses (`/usr` for the
+`.deb`); a plain `cmake --install --prefix` therefore stays consistent as well.
 
 The maintainer scripts do the following:
 
@@ -75,7 +80,7 @@ the CLI can still install the package.
 | AppImage | yes | no |
 
 An IBus component file has to name the engine binary by absolute path
-(`/usr/lib/<triplet>/nexkey/nexkey-ibus`), which does not exist inside an
+(`/usr/lib/<libdir>/nexkey/nexkey-ibus`), which does not exist inside an
 AppImage, so the image is built with `-DNEXKEY_BUILD_IBUS=OFF` and users who
 want IBus install the package.
 

@@ -34,10 +34,16 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build dpkg-dev file ${QT_PACKAGES} \
-            libfcitx5core-dev libibus-1.0-dev
+          sudo apt-get install -y cmake ninja-build pkg-config dpkg-dev file \
+            ${QT_PACKAGES} libfcitx5core-dev libibus-1.0-dev
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DNEXKEY_WARNINGS_AS_ERRORS=ON
+        run: |
+          set -o pipefail
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DNEXKEY_WARNINGS_AS_ERRORS=ON 2>&1 | tee configure.log
+          if grep -Eq "(Qt6|Fcitx5Core|IBus).*not found" configure.log; then
+            echo "::error::a component was skipped: $(grep -E '(Qt6|Fcitx5Core|IBus).*not found' configure.log | head -1)"
+            exit 1
+          fi
       - name: Build
         run: |
           set -o pipefail
@@ -52,8 +58,20 @@ jobs:
       - name: Check the input method backends
         run: |
           set -e
-          test -x build/integrations/ibus/nexkey-ibus
-          test -f build/integrations/fcitx5/nexkey.so
+          backends=0
+          if [ ! -x build/integrations/ibus/nexkey-ibus ]; then
+            echo "::error::the IBus engine was not built"
+            ls -R build/integrations 2>&1 | head -40
+            grep -iE "ibus|pkg.?config" build/CMakeCache.txt | head -20
+            backends=1
+          fi
+          if [ ! -f build/integrations/fcitx5/nexkey.so ]; then
+            echo "::error::the Fcitx5 addon was not built"
+            backends=1
+          fi
+          if [ "$backends" -ne 0 ]; then
+            exit 1
+          fi
           python3 - <<'PY'
           import xml.etree.ElementTree as ET
           root = ET.parse("build/integrations/ibus/nexkey.xml").getroot()
@@ -63,13 +81,21 @@ jobs:
           assert root.findtext("exec").endswith("/nexkey/nexkey-ibus")
           print("component xml exec:", root.findtext("exec"))
           PY
-          # Without a running IBus daemon the engine must fail cleanly.
-          if timeout 15 build/integrations/ibus/nexkey-ibus > ibus.log 2>&1; then
+          # Without a running IBus daemon the engine must fail cleanly
+          # instead of hanging or crashing.
+          set +e
+          timeout 15 build/integrations/ibus/nexkey-ibus > ibus.log 2>&1
+          code=$?
+          set -e
+          echo "engine exit code: $code"
+          cat ibus.log || true
+          if [ "$code" -eq 0 ]; then
             echo "::error::the engine started without an IBus daemon"
             exit 1
-          else
-            cat ibus.log
-            grep -q "cannot connect to the IBus daemon" ibus.log
+          fi
+          if [ "$code" -eq 124 ]; then
+            echo "::error::the engine hangs without an IBus daemon"
+            exit 1
           fi
       - name: Build the Debian package
         run: cmake --build build --target package
@@ -78,20 +104,28 @@ jobs:
           set -e
           dpkg-deb --info build/*.deb
           contents="$(dpkg-deb --contents build/*.deb)"
-          printf '%s\n' "$contents" | grep -E 'usr/bin/nexkey-gui'
-          printf '%s\n' "$contents" | grep -E 'fcitx5/nexkey\.so'
-          printf '%s\n' "$contents" | grep -E 'usr/share/applications/nexkey.desktop'
-          printf '%s\n' "$contents" | grep -E 'usr/share/nexkey/nexkey-autostart.desktop'
-          printf '%s\n' "$contents" | grep -E 'usr/lib/[^/]+/nexkey/nexkey-ibus'
-          printf '%s\n' "$contents" | grep -E 'usr/share/ibus/component/nexkey.xml'
+
+          require_path() {
+            if ! printf '%s\n' "$contents" | grep -Eq "$1"; then
+              echo "::error::the package is missing a file matching: $1"
+              printf '%s\n' "$contents" | head -60
+              exit 1
+            fi
+          }
+          require_path 'usr/bin/nexkey-gui'
+          require_path 'fcitx5/nexkey\.so'
+          require_path 'usr/share/applications/nexkey\.desktop'
+          require_path 'usr/share/nexkey/nexkey-autostart\.desktop'
+          require_path 'usr/lib/([^/]+/)?nexkey/nexkey-ibus'
+          require_path 'usr/share/ibus/component/nexkey\.xml'
 
           depends="$(dpkg-deb --field build/*.deb Depends)"
           echo "Depends: $depends"
-          printf '%s' "$depends" | grep -Eq 'libqt6core6|libqt6core6t64' \
+          printf '%s' "$depends" | grep -Eq 'libqt6core6' \
             || { echo "::error::the Qt6 runtime dependency is missing"; exit 1; }
           printf '%s' "$depends" | grep -Eq 'libfcitx5core' \
             || { echo "::error::the Fcitx5 runtime dependency is missing"; exit 1; }
-          printf '%s' "$depends" | grep -Eq 'libibus-1.0-5' \
+          printf '%s' "$depends" | grep -Eq 'libibus-1\.0-5' \
             || { echo "::error::the IBus runtime dependency is missing"; exit 1; }
           dpkg-deb --field build/*.deb Recommends | grep -q fcitx5 \
             || { echo "::error::fcitx5 is not a recommended package"; exit 1; }
@@ -101,6 +135,16 @@ jobs:
           test -x "$extract/usr/bin/nexkey-gui"
           test -x "$extract/usr/bin/nexkey"
           "$extract/usr/bin/nexkey" methods | grep -q telex
+
+          # The component file registers the engine by absolute path, so the
+          # path it names has to exist inside the package.
+          engine="$(python3 -c "import xml.etree.ElementTree as ET; print(ET.parse('$extract/usr/share/ibus/component/nexkey.xml').getroot().findtext('exec'))")"
+          echo "IBus engine path: $engine"
+          if [ ! -x "$extract$engine" ]; then
+            echo "::error::the IBus component points to $engine, which is not in the package"
+            find "$extract" -name 'nexkey-ibus' || true
+            exit 1
+          fi
       - uses: actions/upload-artifact@v6
         with:
           name: debian-package

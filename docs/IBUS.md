@@ -13,7 +13,9 @@ integrations/ibus/data/nexkey.xml   component file, filled in at configure time
 An IBus engine is a separate process that connects to the IBus daemon on the
 session bus. The component file below
 `/usr/share/ibus/component/nexkey.xml` tells IBus what to start and which
-engines the binary provides.
+engines the binary provides. IBus starts the engine by absolute path, so the
+installed copy of that file is rewritten at install time with the prefix the
+files were actually installed under.
 
 | Piece | Purpose |
 | --- | --- |
