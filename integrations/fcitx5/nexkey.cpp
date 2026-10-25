@@ -109,15 +109,15 @@ ToggleKey parse_toggle_key(std::string_view text)
 /// carries and ends the composition.
 class NexKeyCandidate final : public fcitx::CandidateWord {
 public:
-    NexKeyCandidate(fcitx::Text text, const std::string& comment, std::string commit,
+    NexKeyCandidate(const std::string& text, const std::string& comment, std::string commit,
                     std::function<void()> onSelect)
         : commit_(std::move(commit))
         , onSelect_(std::move(onSelect))
     {
-        setText(std::move(text));
-        if (!comment.empty()) {
-            setComment(fcitx::Text(comment));
-        }
+        // Fcitx5 only grew a separate comment field in 5.1.9, so the note is
+        // part of the label to work with older releases as well.
+        const auto label = comment.empty() ? text : text + " - " + comment;
+        setText(fcitx::Text(label));
     }
 
     void select(fcitx::InputContext* inputContext) const override
@@ -306,7 +306,7 @@ private:
 
         for (const auto& alternative : alternatives) {
             auto word = std::make_unique<NexKeyCandidate>(
-                fcitx::Text(alternative.text), alternative.comment, alternative.text,
+                alternative.text, alternative.comment, alternative.text,
                 [this, ic, text = alternative.text] {
                     engine_.discard();
                     if (!text.empty()) {
@@ -335,8 +335,8 @@ private:
         if (!engine_.composing()) {
             return false;
         }
-        auto* list = ic->inputPanel().candidateList();
-        if (list == nullptr) {
+        const auto list = ic->inputPanel().candidateList();
+        if (!list) {
             return false;
         }
 
