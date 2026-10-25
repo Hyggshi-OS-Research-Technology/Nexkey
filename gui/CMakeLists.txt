@@ -15,6 +15,8 @@ qt_add_executable(nexkey-gui
     SettingsDialog.hpp
     TrayApplication.cpp
     TrayApplication.hpp
+    EmojiPicker.cpp
+    EmojiPicker.hpp
     resources.qrc
 )
 

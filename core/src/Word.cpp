@@ -435,6 +435,8 @@ ParsedWord parse(Method method, std::string_view raw, const Options& options)
         return parse_telex(raw, options, false);
     case Method::SimpleTelex:
         return parse_telex(raw, options, true);
+    case Method::Microsoft:
+        return parse_telex(raw, options, false);
     case Method::Vni:
         return parse_vni(raw);
     case Method::Viqr:
@@ -478,6 +480,7 @@ bool is_word_boundary(char32_t code_point, const Options& options) noexcept
         break;
     case Method::Telex:
     case Method::SimpleTelex:
+    case Method::Microsoft:
         if (options.bracket_shortcuts &&
             std::string_view{"[]{}"}.find(value) != std::string_view::npos) {
             return false;

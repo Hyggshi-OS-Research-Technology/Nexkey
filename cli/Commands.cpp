@@ -8,6 +8,7 @@
 #include "nexkey/Settings.hpp"
 #include "nexkey/Types.hpp"
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -53,6 +54,7 @@ void print_settings(std::ostream& out, const Settings& settings)
         << "english_fallback=" << bool_text(settings.options.english_fallback) << '\n'
         << "bracket_shortcuts=" << bool_text(settings.options.bracket_shortcuts) << '\n'
         << "candidates=" << bool_text(settings.options.candidates) << '\n'
+        << "direct_typing=" << bool_text(settings.options.direct_typing) << '\n'
         << "toggle_key=" << settings.toggle_key << '\n'
         << "show_tray_icon=" << bool_text(settings.show_tray_icon) << '\n'
         << "start_with_system=" << bool_text(settings.start_with_system) << '\n'
@@ -85,13 +87,28 @@ std::optional<std::string> config_value(const Settings& settings, std::string_vi
     if (key == "engine.candidates") {
         return std::string(bool_text(settings.options.candidates));
     }
-    if (key == "ui.toggle_key") {
+    if (key == "engine.direct_typing" || key == "engine.no_preedit" || key == "direct_typing") {
+        return std::string(bool_text(settings.options.direct_typing));
+    }
+    if (key == "engine.spell_check" || key == "spell_check") {
+        return std::string(bool_text(settings.options.spell_check));
+    }
+    if (key == "engine.macro_enabled" || key == "macro_enabled" || key == "macro") {
+        return std::string(bool_text(settings.options.macro_enabled));
+    }
+    if (key == "engine.capitalize_macro" || key == "capitalize_macro") {
+        return std::string(bool_text(settings.options.capitalize_macro));
+    }
+    if (key == "engine.custom_dict" || key == "custom_dict") {
+        return std::string(bool_text(settings.options.custom_dict));
+    }
+    if (key == "ui.toggle_key" || key == "toggle_key") {
         return settings.toggle_key;
     }
-    if (key == "ui.show_tray_icon") {
+    if (key == "ui.show_tray_icon" || key == "show_tray_icon") {
         return std::string(bool_text(settings.show_tray_icon));
     }
-    if (key == "ui.start_with_system") {
+    if (key == "ui.start_with_system" || key == "start_with_system") {
         return std::string(bool_text(settings.start_with_system));
     }
     return std::nullopt;
@@ -112,7 +129,7 @@ bool parse_bool_value(std::string_view text, bool& out)
 
 bool apply_config(Settings& settings, std::string_view key, std::string_view value)
 {
-    if (key == "input.method") {
+    if (key == "input.method" || key == "method") {
         const auto method = method_from_string(value);
         if (!method) {
             return false;
@@ -120,7 +137,7 @@ bool apply_config(Settings& settings, std::string_view key, std::string_view val
         settings.options.method = *method;
         return true;
     }
-    if (key == "input.tone_style") {
+    if (key == "input.tone_style" || key == "tone_style") {
         const auto style = tone_style_from_string(value);
         if (!style) {
             return false;
@@ -128,7 +145,7 @@ bool apply_config(Settings& settings, std::string_view key, std::string_view val
         settings.options.tone_style = *style;
         return true;
     }
-    if (key == "output.encoding") {
+    if (key == "output.encoding" || key == "encoding") {
         const auto encoding = encoding_from_string(value);
         if (!encoding) {
             return false;
@@ -136,7 +153,7 @@ bool apply_config(Settings& settings, std::string_view key, std::string_view val
         settings.options.encoding = *encoding;
         return true;
     }
-    if (key == "ui.toggle_key") {
+    if (key == "ui.toggle_key" || key == "toggle_key") {
         settings.toggle_key = std::string(value);
         return true;
     }
@@ -144,19 +161,29 @@ bool apply_config(Settings& settings, std::string_view key, std::string_view val
     if (!parse_bool_value(value, flag)) {
         return false;
     }
-    if (key == "input.enabled") {
+    if (key == "input.enabled" || key == "enabled") {
         settings.enabled = flag;
-    } else if (key == "engine.smart_backspace") {
+    } else if (key == "engine.smart_backspace" || key == "smart_backspace") {
         settings.options.smart_backspace = flag;
-    } else if (key == "engine.english_fallback") {
+    } else if (key == "engine.english_fallback" || key == "english_fallback") {
         settings.options.english_fallback = flag;
-    } else if (key == "engine.bracket_shortcuts") {
+    } else if (key == "engine.bracket_shortcuts" || key == "bracket_shortcuts") {
         settings.options.bracket_shortcuts = flag;
-    } else if (key == "engine.candidates") {
+    } else if (key == "engine.candidates" || key == "candidates") {
         settings.options.candidates = flag;
-    } else if (key == "ui.show_tray_icon") {
+    } else if (key == "engine.direct_typing" || key == "engine.no_preedit" || key == "direct_typing") {
+        settings.options.direct_typing = flag;
+    } else if (key == "engine.spell_check" || key == "spell_check") {
+        settings.options.spell_check = flag;
+    } else if (key == "engine.macro_enabled" || key == "macro_enabled" || key == "macro") {
+        settings.options.macro_enabled = flag;
+    } else if (key == "engine.capitalize_macro" || key == "capitalize_macro") {
+        settings.options.capitalize_macro = flag;
+    } else if (key == "engine.custom_dict" || key == "custom_dict") {
+        settings.options.custom_dict = flag;
+    } else if (key == "ui.show_tray_icon" || key == "show_tray_icon") {
         settings.show_tray_icon = flag;
-    } else if (key == "ui.start_with_system") {
+    } else if (key == "ui.start_with_system" || key == "start_with_system") {
         settings.start_with_system = flag;
     } else {
         return false;
@@ -382,4 +409,97 @@ int run_toggle(const Args& args)
     return 0;
 }
 
+int run_macro(const Args& args)
+{
+    const OptionParser parser(args, {});
+    const auto& positional = parser.positional();
+    const auto command = positional.empty() ? std::string("list") : positional.front();
+
+    if (command == "path") {
+        std::cout << default_macros_path().string() << '\n';
+        return 0;
+    }
+
+    auto macros = load_macros();
+
+    if (command == "list") {
+        std::vector<std::pair<std::string, std::string>> sorted(macros.begin(), macros.end());
+        std::ranges::sort(sorted, [](const auto& a, const auto& b) { return a.first < b.first; });
+        for (const auto& [k, v] : sorted) {
+            std::cout << k << '=' << v << '\n';
+        }
+        return 0;
+    }
+
+    if (command == "get") {
+        if (positional.size() < 2) {
+            std::cerr << "nexkey: macro get needs a key\n";
+            return 2;
+        }
+        if (auto it = macros.find(positional[1]); it != macros.end()) {
+            std::cout << it->second << '\n';
+            return 0;
+        }
+        std::cerr << "nexkey: macro not found: " << positional[1] << '\n';
+        return 1;
+    }
+
+    if (command == "set") {
+        if (positional.size() < 3) {
+            std::cerr << "nexkey: macro set needs a key and a value\n";
+            return 2;
+        }
+        macros[positional[1]] = positional[2];
+        if (!save_macros(macros)) {
+            std::cerr << "nexkey: cannot write " << default_macros_path().string() << '\n';
+            return 1;
+        }
+        std::cout << positional[1] << '=' << positional[2] << '\n';
+        return 0;
+    }
+
+    if (command == "delete" || command == "del" || command == "rm") {
+        if (positional.size() < 2) {
+            std::cerr << "nexkey: macro delete needs a key\n";
+            return 2;
+        }
+        if (macros.erase(positional[1]) > 0) {
+            if (!save_macros(macros)) {
+                std::cerr << "nexkey: cannot write " << default_macros_path().string() << '\n';
+                return 1;
+            }
+            std::cout << "deleted: " << positional[1] << '\n';
+            return 0;
+        }
+        std::cerr << "nexkey: macro not found: " << positional[1] << '\n';
+        return 1;
+    }
+
+    std::cerr << "nexkey: unknown macro command " << command << '\n';
+    return 2;
+}
+
+int run_emoji(const Args& args)
+{
+    const OptionParser parser(args, {});
+    const auto& positional = parser.positional();
+    const std::string query = positional.empty() ? std::string{} : positional.front();
+
+    const auto macros = load_macros();
+    std::vector<std::pair<std::string, std::string>> matches;
+    for (const auto& [k, v] : macros) {
+        if (k.starts_with(":") || k == "<3" || k == "(y)" || k.starts_with(";")) {
+            if (query.empty() || k.find(query) != std::string::npos || v.find(query) != std::string::npos) {
+                matches.emplace_back(k, v);
+            }
+        }
+    }
+    std::ranges::sort(matches, [](const auto& a, const auto& b) { return a.first < b.first; });
+    for (const auto& [k, v] : matches) {
+        std::cout << v << "  " << k << '\n';
+    }
+    return 0;
+}
+
 } // namespace nexkey::cli
+

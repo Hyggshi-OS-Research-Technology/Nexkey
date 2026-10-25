@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace nexkey {
@@ -78,11 +79,22 @@ public:
     /// Commit one specific candidate and start a new word.
     [[nodiscard]] Step commit_candidate(std::size_t index);
 
+    /// Set macros (e.g. "vn" -> "Việt Nam", ":heart:" -> "❤️").
+    void set_macros(std::unordered_map<std::string, std::string> macros)
+    {
+        m_macros = std::move(macros);
+    }
+    [[nodiscard]] const std::unordered_map<std::string, std::string>& macros() const noexcept
+    {
+        return m_macros;
+    }
+
 private:
     void recompute();
     void reset_state();
 
     Options m_options;
+    std::unordered_map<std::string, std::string> m_macros;
     std::string m_raw;
     std::string m_preedit;
     std::vector<std::string> m_history;

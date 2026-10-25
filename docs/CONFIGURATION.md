@@ -27,11 +27,28 @@ encoding=unicode
 smart_backspace=true
 english_fallback=true
 bracket_shortcuts=true
+candidates=false
+direct_typing=true
+spell_check=true
+macro_enabled=true
+capitalize_macro=true
+custom_dict=false
+
+[macro]
+time_format=%H:%M:%S
+date_format=%d/%m/%Y
+
+[keymap]
+preset=telex
+
+[app_rules]
+code=telex
+gnome-terminal=off
 
 [ui]
 toggle_key=Control+Shift
 show_tray_icon=true
-start_with_system=false
+start_with_system=true
 ```
 
 ## Keys
@@ -40,12 +57,12 @@ start_with_system=false
 
 | Key | Values | Default | Meaning |
 | --- | --- | --- | --- |
-| `method` | `telex`, `telex-simple`, `vni`, `viqr` | `telex` | Key mapping used to compose words |
+| `method` | `telex`, `telex-simple`, `vni`, `viqr`, `microsoft` | `telex` | Key mapping used to compose words |
 | `tone_style` | `modern`, `traditional` | `modern` | Tone position in open syllables with an `o` or `u` glide |
 | `enabled` | `true`, `false` | `true` | Vietnamese mode (`VI`) or English mode (`EN`) |
 
 `telex-simple` keeps the tone keys and the doubled letters but drops the `w`
-shortcut and the bracket shortcuts.
+shortcut and the bracket shortcuts. `microsoft` layout uses the Windows Telex preset.
 
 ### `[output]`
 
@@ -57,10 +74,39 @@ shortcut and the bracket shortcuts.
 
 | Key | Values | Default | Meaning |
 | --- | --- | --- | --- |
+| `direct_typing` | `true`, `false` | `true` | Direct typing without preedit underlines (Non-preedit) |
 | `smart_backspace` | `true`, `false` | `true` | Skip keystrokes that had no visible effect when deleting |
-| `english_fallback` | `true`, `false` | `true` | Show the raw keystrokes while the word is not Vietnamese |
+| `english_fallback` | `true`, `false` | `true` | Auto-restore raw keystrokes when typing non-Vietnamese words |
+| `spell_check` | `true`, `false` | `true` | Enable dictionary-based spell checking and plausibility |
+| `macro_enabled` | `true`, `false` | `true` | Enable macro shorthand expansion |
+| `capitalize_macro` | `true`, `false` | `true` | Auto-capitalize macro expansions when abbreviation is capitalized |
+| `custom_dict` | `true`, `false` | `false` | Enable personal custom dictionary |
 | `bracket_shortcuts` | `true`, `false` | `true` | `[`, `]`, `{`, `}` produce the horned vowels in Telex |
-| `candidates` | `true`, `false` | `true` | Show the word selection window with the alternative readings |
+| `candidates` | `true`, `false` | `false` | Show the word selection window with the alternative readings |
+
+### `[macro]`
+
+| Key | Values | Default | Meaning |
+| --- | --- | --- | --- |
+| `time_format` | strftime format | `%H:%M:%S` | Format string for dynamic `$TIME` placeholder |
+| `date_format` | strftime format | `%d/%m/%Y` | Format string for dynamic `$DATE` placeholder |
+
+### `[keymap]`
+
+| Key | Values | Default | Meaning |
+| --- | --- | --- | --- |
+| `preset` | `telex`, `vni`, `viqr`, `microsoft` | `telex` | Default keyboard preset layout |
+
+### `[app_rules]`
+
+Per-application input rules. Examples:
+- `code=telex` (always use Telex in VS Code)
+- `gnome-terminal=off` (bypass Vietnamese composition in terminal)
+- `firefox=vni` (use VNI when browsing)
+
+### `[custom_dictionary]`
+
+Personal custom dictionary words (one per line, e.g. `kubernetes=1`).
 
 ### `[ui]`
 
@@ -163,3 +209,50 @@ configured toggle key, from the tray icon, over D-Bus or from the menu item of
 the input method panel.
 
 The IBus engine is documented separately in [IBUS.md](IBUS.md).
+
+## Backup & Restore (JSON)
+
+NexKey supports exporting and importing the entire configuration using JSON files. The backup file contains 5 components that can be selectively exported and imported:
+
+- `main_settings`: Engine options, input method, output encoding, toggle key, time/date formats.
+- `macros`: Shorthand expansion dictionary and emoji shortcodes (including `$TIME`, `$DATE`).
+- `custom_keymaps`: Keyboard layout preset (`telex`, `vni`, `viqr`, `microsoft`).
+- `app_rules`: Per-application input mode rules.
+- `custom_dictionary`: Personal custom dictionary entries.
+
+Example `nexkey_backup.json`:
+
+```json
+{
+  "version": "2.0.0",
+  "main_settings": {
+    "method": "telex",
+    "tone_style": "modern",
+    "encoding": "unicode",
+    "enabled": true,
+    "direct_typing": true,
+    "spell_check": true,
+    "macro_enabled": true,
+    "capitalize_macro": true,
+    "custom_dict": false,
+    "toggle_key": "Control+Shift",
+    "time_format": "%H:%M:%S",
+    "date_format": "%d/%m/%Y"
+  },
+  "macros": {
+    "vn": "Việt Nam",
+    "kg": "khô gà $TIME",
+    ":fire:": "🔥"
+  },
+  "custom_keymaps": {
+    "preset": "telex"
+  },
+  "app_rules": {
+    "code": "telex",
+    "gnome-terminal": "off"
+  },
+  "custom_dictionary": [
+    "kubernetes"
+  ]
+}
+```

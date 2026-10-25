@@ -33,24 +33,31 @@ with CMake.
 
 ## Features
 
-- Telex (with or without the `w` and bracket shortcuts), VNI and VIQR.
-- Tone placement for open, closed and triphthong nuclei, in both the modern and
-  the traditional style.
-- Output as precomposed Unicode, Unicode NFD, TCVN3 or VIQR.
-- State based composition with smart backspace and double key escape: pressing
-  the same tone or vowel modifier twice types the key literally.
-- Words that are not plausible Vietnamese, such as `windows` or `jazz`, are
-  shown exactly as typed instead of being mangled.
-- Two native backends, both with a configurable toggle key, a VI/EN indicator
-  and a word selection window for the alternative readings of a word:
-  **Fcitx5** (addon with panel icon and submode) and **IBus** (engine process
-  with a panel menu and lookup table).
-- Qt6 tray application with a settings dialog (input method, tone style,
-  charset, toggle key, engine options, autostart) and a D-Bus service
-  (`org.nexkey.Daemon`) for scripts and desktop shortcuts.
-- Command line tool to test the engine, convert files between charsets and
-  script the configuration.
-- Debian package and a self contained AppImage, both attached to every CI run.
+- **100% Native Direct Typing (Non-preedit)**: Eliminates annoying underlines while typing. Characters appear directly and immediately in the document (VS Code, Chrome, terminals, LibreOffice), avoiding input latency and visual clutter.
+- **Ultra High Performance**: Leverages instant SurroundingText & key forwarding optimized for high-speed Linux applications across X11 & Wayland.
+- **System Tray Quick Settings**: Right-click the NexKey tray icon for instant toggles: output charset, spell check, macros, capitalized macro, non-Vietnamese auto-restore, custom dictionary, and the smart emoji picker.
+- **Per-Application Rules (App Rules)**: Assign dedicated input modes per application or window (e.g. `code` → `telex`, `gnome-terminal` → `off`, `firefox` → `vni`).
+- **Backup & Restore**: Export and import complete configurations via JSON files with selective component filtering: Main Settings, Macros, Custom Keymaps, App Rules, and Custom Dictionary.
+- **Dynamic `$TIME` / `$DATE` Macros**: Macro expansions support dynamic placeholders `$TIME` and `$DATE` (e.g. `kg` → `khô gà $TIME`), customizable via `Time Format` and `Date Format`.
+- **Keyboard Presets**: Built-in support for popular layouts: Telex, Simple Telex, VNI, VIQR, and Microsoft layout with one-click preset switching.
+- **Smart Emoji Picker**: Fast emoji search with fuzzy matching and a 9-recent-emoji history row with instant clipboard copying.
+- **Intelligent Error Correction & Fallback**: Automatically restores non-Vietnamese words (Auto Non-VN Restore) so foreign and English words (e.g. `windows`, `jazz`) are never corrupted.
+- **Linux Native & Stable**: Seamlessly compatible with Wayland, X11, Chromium, Electron, and Wine. Zero character loss on space or window focus changes.
+
+## Quick Settings (System Tray)
+
+Right-click the NexKey system tray icon to access quick settings:
+
+| Option | Function | Default |
+| --- | --- | --- |
+| **Output Charset** | Choose output encoding (Unicode, Unicode NFD, TCVN3, VIQR) | `Unicode` |
+| **Spell Check** | Dictionary-based spell checking and plausibility | On |
+| **Macro** | Enable/disable macro shorthand expansion | On |
+| **Capitalize Macro** | Auto-capitalize macro expansions when shorthand is capitalized | On |
+| **Auto Non-VN Restore** | Automatically restore non-Vietnamese words | On |
+| **Custom Dictionary** | Use personal custom dictionary | Off |
+| **Direct Typing** | Direct typing without preedit underline (Non-preedit) | On |
+| **Emoji Picker...** | Open the smart emoji picker dialog | — |
 
 ## Requirements
 

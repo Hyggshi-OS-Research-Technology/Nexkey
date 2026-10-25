@@ -49,6 +49,8 @@ void print_help(std::ostream& out)
         << "  toggle                    Switch between Vietnamese and English mode\n"
         << "  config [show|get|set|path]\n"
         << "                            Inspect or change the configuration\n"
+        << "  macro [list|get|set|del]  Manage shorthand macros (gõ tắt)\n"
+        << "  emoji [query]             Search emoji shortcuts\n"
         << "  methods                   List the input methods\n"
         << "  encodings                 List the character sets\n"
         << "  version                   Print the version\n"

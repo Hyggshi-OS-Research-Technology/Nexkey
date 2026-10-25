@@ -24,6 +24,8 @@ int run_convert(const Args& args);
 int run_config(const Args& args);
 int run_status(const Args& args);
 int run_toggle(const Args& args);
+int run_macro(const Args& args);
+int run_emoji(const Args& args);
 
 /// Parse "--name value" and "--name=value" options.
 class OptionParser {

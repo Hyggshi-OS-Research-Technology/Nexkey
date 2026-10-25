@@ -18,6 +18,7 @@ enum class Method : std::uint8_t {
     SimpleTelex,///< Telex without the w-shortcuts and bracket shortcuts.
     Vni,        ///< VNI: digits 1-9 act as tone and vowel modifiers.
     Viqr,       ///< VIQR: pure ASCII notation with punctuation markers.
+    Microsoft,  ///< Microsoft layout (Telex with bracket shortcuts).
 };
 
 /// Character set used for the composed output.
@@ -53,12 +54,22 @@ struct Options {
     bool bracket_shortcuts{true};
     /// Offer the alternative interpretations of a word in a candidate window.
     bool candidates{true};
+    /// Type directly into the document without preedit underline.
+    bool direct_typing{true};
+    /// Spell check with dictionary.
+    bool spell_check{true};
+    /// Enable macro shorthand expansion.
+    bool macro_enabled{true};
+    /// Capitalize macro replacements when abbreviation is capitalized.
+    bool capitalize_macro{true};
+    /// Enable custom personal dictionary.
+    bool custom_dict{false};
 
     friend constexpr bool operator==(const Options&, const Options&) = default;
 };
 
 namespace literals {
-inline constexpr std::string_view kMethodNames[]{"telex", "telex-simple", "vni", "viqr"};
+inline constexpr std::string_view kMethodNames[]{"telex", "telex-simple", "vni", "viqr", "microsoft"};
 inline constexpr std::string_view kEncodingNames[]{"unicode", "unicode-decomposed", "tcvn3", "viqr"};
 inline constexpr std::string_view kToneStyleNames[]{"traditional", "modern"};
 } // namespace literals
@@ -66,7 +77,7 @@ inline constexpr std::string_view kToneStyleNames[]{"traditional", "modern"};
 constexpr std::string_view to_string(Method method) noexcept
 {
     const auto index = static_cast<std::size_t>(method);
-    return index <= 3 ? literals::kMethodNames[index] : std::string_view{};
+    return index <= 4 ? literals::kMethodNames[index] : std::string_view{};
 }
 
 constexpr std::string_view to_string(Encoding encoding) noexcept
@@ -83,13 +94,16 @@ constexpr std::string_view to_string(ToneStyle style) noexcept
 
 constexpr std::optional<Method> method_from_string(std::string_view name) noexcept
 {
-    for (std::size_t i = 0; i < 4; ++i) {
+    for (std::size_t i = 0; i < 5; ++i) {
         if (name == literals::kMethodNames[i]) {
             return static_cast<Method>(i);
         }
     }
     if (name == "telex_simple" || name == "simple-telex") {
         return Method::SimpleTelex;
+    }
+    if (name == "ms" || name == "windows") {
+        return Method::Microsoft;
     }
     return std::nullopt;
 }

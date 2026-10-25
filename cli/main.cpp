@@ -55,6 +55,12 @@ int main(int argc, char** argv)
     if (command == "toggle") {
         return run_toggle(rest);
     }
+    if (command == "macro") {
+        return run_macro(rest);
+    }
+    if (command == "emoji") {
+        return run_emoji(rest);
+    }
 
     std::cerr << "nexkey: unknown command " << command << "\n\n";
     print_help(std::cerr);

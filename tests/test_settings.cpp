@@ -106,3 +106,43 @@ TEST(settings_default_path_is_under_xdg)
     EXPECT_FALSE(path.empty());
     EXPECT_EQ(path.filename(), std::filesystem::path("nexkey.conf"));
 }
+
+TEST(settings_backup_json_round_trip)
+{
+    const TempFile file{"backup/backup.json"};
+
+    nexkey::Settings original;
+    original.options.method = nexkey::Method::Microsoft;
+    original.options.encoding = nexkey::Encoding::Unicode;
+    original.options.tone_style = nexkey::ToneStyle::Modern;
+    original.options.direct_typing = true;
+    original.options.spell_check = true;
+    original.options.macro_enabled = true;
+    original.options.capitalize_macro = true;
+    original.options.custom_dict = true;
+    original.time_format = "%H:%M";
+    original.date_format = "%d/%m/%Y";
+    original.macros["kg"] = "khô gà $TIME";
+    original.app_rules["code"] = "telex";
+    original.app_rules["terminal"] = "off";
+    original.custom_dictionary.push_back("kubernetes");
+
+    EXPECT_TRUE(nexkey::export_backup_file(file.path(), original));
+
+    nexkey::Settings restored;
+    EXPECT_TRUE(nexkey::import_backup_file(file.path(), restored));
+
+    EXPECT_EQ(restored.options.method, nexkey::Method::Microsoft);
+    EXPECT_TRUE(restored.options.direct_typing);
+    EXPECT_TRUE(restored.options.spell_check);
+    EXPECT_TRUE(restored.options.macro_enabled);
+    EXPECT_TRUE(restored.options.capitalize_macro);
+    EXPECT_TRUE(restored.options.custom_dict);
+    EXPECT_EQ(restored.time_format, std::string("%H:%M"));
+    EXPECT_EQ(restored.date_format, std::string("%d/%m/%Y"));
+    EXPECT_EQ(restored.macros["kg"], std::string("khô gà $TIME"));
+    EXPECT_EQ(restored.app_rules["code"], std::string("telex"));
+    EXPECT_EQ(restored.app_rules["terminal"], std::string("off"));
+    EXPECT_EQ(restored.custom_dictionary.size(), 1u);
+    EXPECT_EQ(restored.custom_dictionary.front(), std::string("kubernetes"));
+}

@@ -73,6 +73,7 @@ struct Session {
 
         settings = nexkey::load_settings(path);
         engine.set_options(settings.options);
+        engine.set_macros(settings.macros);
         toggle = parse_toggle(settings.toggle_key);
     }
 
@@ -308,6 +309,7 @@ bool toggle_matches(const Session& session, guint keyval, guint state)
 void apply_mode(IBusEngine* engine, Session& session)
 {
     session.engine.set_options(session.settings.options);
+    session.engine.set_macros(session.settings.macros);
     session.engine.discard();
     session.candidates.clear();
     ibus_engine_hide_lookup_table(engine);
@@ -393,7 +395,7 @@ void on_focus_in(IBusEngine* engine)
 {
     auto& session = *NEXKEY_IBUS_ENGINE(engine)->session;
     session.reload(true);
-    session.engine.discard();
+    commit_all(engine, session);
     update_properties(engine, session);
     ibus_engine_update_auxiliary_text(
         engine,
@@ -410,7 +412,7 @@ void on_focus_out(IBusEngine* engine)
 void on_reset(IBusEngine* engine)
 {
     auto& session = *NEXKEY_IBUS_ENGINE(engine)->session;
-    session.engine.discard();
+    commit_all(engine, session);
     session.candidates.clear();
     ibus_engine_hide_lookup_table(engine);
     update_preedit(engine, session);

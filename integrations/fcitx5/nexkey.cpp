@@ -4,6 +4,7 @@
 #include "nexkey/Engine.hpp"
 #include "nexkey/Settings.hpp"
 #include "nexkey/Types.hpp"
+#include "nexkey/Unicode.hpp"
 
 #include <fcitx-utils/key.h>
 #include <fcitx-utils/keysym.h>
@@ -122,7 +123,88 @@ public:
     /// Value of the addon wide configuration generation the options above
     /// were taken from.
     unsigned generation{0};
+    /// Characters already committed directly to the client in direct typing mode.
+    std::string committed_text;
 };
+
+inline std::size_t utf8_char_count(std::string_view text) noexcept
+{
+    std::size_t count = 0;
+    for (const char ch : text) {
+        if ((static_cast<unsigned char>(ch) & 0xC0) != 0x80) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+struct CommonPrefix {
+    std::size_t char_count{0};
+    std::size_t byte_length{0};
+};
+
+inline CommonPrefix utf8_common_prefix(std::string_view a, std::string_view b) noexcept
+{
+    std::size_t i = 0;
+    std::size_t char_count = 0;
+    while (i < a.size() && i < b.size()) {
+        const auto c = static_cast<unsigned char>(a[i]);
+        std::size_t char_len = 1;
+        if ((c & 0x80) == 0) {
+            char_len = 1;
+        } else if ((c & 0xE0) == 0xC0) {
+            char_len = 2;
+        } else if ((c & 0xF0) == 0xE0) {
+            char_len = 3;
+        } else if ((c & 0xF8) == 0xF0) {
+            char_len = 4;
+        } else {
+            break;
+        }
+
+        if (i + char_len > a.size() || i + char_len > b.size()) {
+            break;
+        }
+
+        bool match = true;
+        for (std::size_t k = 0; k < char_len; ++k) {
+            if (a[i + k] != b[i + k]) {
+                match = false;
+                break;
+            }
+        }
+        if (!match) {
+            break;
+        }
+
+        i += char_len;
+        ++char_count;
+    }
+    return {char_count, i};
+}
+
+void delete_characters(fcitx::InputContext* ic, std::size_t count)
+{
+    if (count == 0 || ic == nullptr) {
+        return;
+    }
+    if (ic->capabilityFlags().test(fcitx::CapabilityFlag::SurroundingText) &&
+        ic->surroundingText().isValid()) {
+        const auto& st = ic->surroundingText();
+        if (st.cursor() != st.anchor()) {
+            const int sel_len = std::abs(static_cast<int>(st.cursor()) - static_cast<int>(st.anchor()));
+            const int sel_start = std::min(static_cast<int>(st.cursor()), static_cast<int>(st.anchor())) -
+                                  static_cast<int>(st.cursor());
+            ic->deleteSurroundingText(sel_start, static_cast<unsigned int>(sel_len));
+        }
+        ic->deleteSurroundingText(-static_cast<int>(count), static_cast<unsigned int>(count));
+    } else {
+        for (std::size_t i = 0; i < count; ++i) {
+            ic->forwardKey(fcitx::Key(FcitxKey_BackSpace), false);
+            ic->forwardKey(fcitx::Key(FcitxKey_BackSpace), true);
+        }
+    }
+}
 
 /// A candidate of the word selection window. Choosing it commits the text it
 /// carries and ends the composition.
@@ -161,6 +243,7 @@ public:
             auto* state = new NexKeyState;
             state->generation = generation_;
             state->engine.set_options(settings_.options);
+            state->engine.set_macros(settings_.macros);
             return state;
         })
     {
@@ -191,13 +274,17 @@ public:
             return;
         }
 
+        const auto key = event.key();
+        if (key.isModifier()) {
+            return;
+        }
+
         auto* ic = event.inputContext();
         if (ic == nullptr) {
             return;
         }
 
         auto& state = state_of(ic);
-        const auto key = event.key();
 
         // The word selection window comes first: its keys must not reach the
         // word parser. It also decides on its own when to keep the key, so the
@@ -219,6 +306,16 @@ public:
             return;
         }
 
+        // App Rules: check if application is configured to bypass Vietnamese input
+        if (!settings_.app_rules.empty()) {
+            if (auto it = settings_.app_rules.find(ic->program()); it != settings_.app_rules.end()) {
+                if (it->second == "off" || it->second == "en" || it->second == "english") {
+                    commit_all(ic, state);
+                    return;
+                }
+            }
+        }
+
         if (key.sym() == FcitxKey_BackSpace) {
             const auto step = state.engine.backspace();
             if (!step.handled) {
@@ -231,7 +328,10 @@ public:
         }
 
         if (key.sym() == FcitxKey_Return || key.sym() == FcitxKey_KP_Enter ||
-            key.sym() == FcitxKey_Escape || key.sym() == FcitxKey_Tab) {
+            key.sym() == FcitxKey_Escape || key.sym() == FcitxKey_Tab ||
+            key.sym() == FcitxKey_Left || key.sym() == FcitxKey_Right ||
+            key.sym() == FcitxKey_Up || key.sym() == FcitxKey_Down ||
+            key.sym() == FcitxKey_Home || key.sym() == FcitxKey_End) {
             commit_all(ic, state);
             return;
         }
@@ -248,7 +348,21 @@ public:
             return;
         }
         if (!step.commit.empty()) {
-            ic->commitString(step.commit);
+            if (use_direct_typing(ic)) {
+                const auto prefix = utf8_common_prefix(state.committed_text, step.commit);
+                const std::size_t old_total_chars = utf8_char_count(state.committed_text);
+                const std::size_t chars_to_delete = old_total_chars - prefix.char_count;
+                if (chars_to_delete > 0) {
+                    delete_characters(ic, chars_to_delete);
+                }
+                if (prefix.byte_length < step.commit.size()) {
+                    const std::string suffix = step.commit.substr(prefix.byte_length);
+                    ic->commitString(suffix);
+                }
+                state.committed_text.clear();
+            } else {
+                ic->commitString(step.commit);
+            }
         }
         update_preedit(ic, state);
         event.filterAndAccept();
@@ -260,8 +374,7 @@ public:
         reload_settings(true);
         if (auto* ic = event.inputContext(); ic != nullptr) {
             auto& state = state_of(ic);
-            state.engine.discard();
-            update_preedit(ic, state);
+            commit_all(ic, state);
         }
     }
 
@@ -279,8 +392,7 @@ public:
         static_cast<void>(entry);
         if (auto* ic = event.inputContext(); ic != nullptr) {
             auto& state = state_of(ic);
-            state.engine.discard();
-            update_preedit(ic, state);
+            commit_all(ic, state);
         }
     }
 
@@ -308,28 +420,81 @@ private:
         auto* state = ic->propertyFor(&state_factory_);
         if (state->generation != generation_) {
             state->generation = generation_;
-            state->engine.set_options(settings_.options);
+            auto opts = settings_.options;
+            if (ic != nullptr && !settings_.app_rules.empty()) {
+                const auto& prog = ic->program();
+                if (auto it = settings_.app_rules.find(prog); it != settings_.app_rules.end()) {
+                    if (auto m = nexkey::method_from_string(it->second)) {
+                        opts.method = *m;
+                    }
+                }
+            }
+            state->engine.set_options(opts);
+            state->engine.set_macros(settings_.macros);
         }
         return *state;
     }
 
+    bool use_direct_typing(fcitx::InputContext* ic) const
+    {
+        if (!settings_.options.direct_typing) {
+            return false;
+        }
+        if (ic != nullptr) {
+            if (ic->program() == "gnome-text-editor") {
+                return false;
+            }
+            if (auto it = settings_.app_rules.find(ic->program()); it != settings_.app_rules.end()) {
+                if (it->second == "preedit") {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
     void commit_all(fcitx::InputContext* ic, NexKeyState& state)
     {
-        const auto step = state.engine.flush();
-        if (!step.commit.empty()) {
-            ic->commitString(step.commit);
+        if (use_direct_typing(ic)) {
+            state.engine.discard();
+            state.committed_text.clear();
+            auto& panel = ic->inputPanel();
+            panel.setClientPreedit(fcitx::Text{});
+            panel.setCandidateList(nullptr);
+            ic->updatePreedit();
+        } else {
+            const auto step = state.engine.flush();
+            if (!step.commit.empty()) {
+                ic->commitString(step.commit);
+            }
+            update_preedit(ic, state);
         }
-        update_preedit(ic, state);
     }
 
     /// Commit the text of one candidate and end the composition.
     void commit_candidate(fcitx::InputContext* ic, NexKeyState& state, const std::string& text)
     {
-        state.engine.discard();
-        if (!text.empty()) {
-            ic->commitString(text);
+        if (use_direct_typing(ic)) {
+            const auto prefix = utf8_common_prefix(state.committed_text, text);
+            const std::size_t old_total_chars = utf8_char_count(state.committed_text);
+            const std::size_t chars_to_delete = old_total_chars - prefix.char_count;
+            if (chars_to_delete > 0) {
+                delete_characters(ic, chars_to_delete);
+            }
+            state.engine.discard();
+            state.committed_text.clear();
+            if (prefix.byte_length < text.size()) {
+                const std::string suffix = text.substr(prefix.byte_length);
+                ic->commitString(suffix);
+            }
+            update_preedit(ic, state);
+        } else {
+            state.engine.discard();
+            if (!text.empty()) {
+                ic->commitString(text);
+            }
+            update_preedit(ic, state);
         }
-        update_preedit(ic, state);
     }
 
     void update_preedit(fcitx::InputContext* ic, NexKeyState& state)
@@ -337,15 +502,36 @@ private:
         if (ic == nullptr) {
             return;
         }
-        const std::string preedit(state.engine.preedit());
-        auto& panel = ic->inputPanel();
-        if (preedit.empty()) {
+        if (use_direct_typing(ic)) {
+            const std::string new_preedit(state.engine.preedit());
+            if (new_preedit != state.committed_text) {
+                const auto prefix = utf8_common_prefix(state.committed_text, new_preedit);
+                const std::size_t old_total_chars = utf8_char_count(state.committed_text);
+                const std::size_t chars_to_delete = old_total_chars - prefix.char_count;
+                if (chars_to_delete > 0) {
+                    delete_characters(ic, chars_to_delete);
+                }
+                if (prefix.byte_length < new_preedit.size()) {
+                    const std::string suffix = new_preedit.substr(prefix.byte_length);
+                    ic->commitString(suffix);
+                }
+                state.committed_text = new_preedit;
+            }
+            auto& panel = ic->inputPanel();
             panel.setClientPreedit(fcitx::Text{});
+            update_candidates(ic, state);
+            ic->updatePreedit();
         } else {
-            panel.setClientPreedit(fcitx::Text(preedit));
+            const std::string preedit(state.engine.preedit());
+            auto& panel = ic->inputPanel();
+            if (preedit.empty()) {
+                panel.setClientPreedit(fcitx::Text{});
+            } else {
+                panel.setClientPreedit(fcitx::Text(preedit));
+            }
+            update_candidates(ic, state);
+            ic->updatePreedit();
         }
-        update_candidates(ic, state);
-        ic->updatePreedit();
     }
 
     /// Publish the alternative interpretations of the current word.
@@ -459,15 +645,23 @@ private:
             }
         }
 
-        // Space takes the highlighted entry; the space itself keeps flowing to
-        // the application, which is why this path reports the key as unused.
+        // Space commits the highlighted candidate (or preedit) followed by a space
+        // in one atomic commit, avoiding double-commit issues in editors.
         if (symbol == FcitxKey_space) {
             const int index = list->cursorIndex();
+            std::string text;
             if (index >= 0 && index < list->size()) {
-                commit_candidate(ic, state,
-                                 static_cast<const NexKeyCandidate&>(list->candidate(index))
-                                     .commit_text());
+                text = static_cast<const NexKeyCandidate&>(list->candidate(index)).commit_text();
+            } else {
+                text = state.engine.preedit();
             }
+            state.engine.discard();
+            if (!text.empty()) {
+                text.push_back(' ');
+                ic->commitString(text);
+            }
+            update_preedit(ic, state);
+            return true;
         }
         return false;
     }
@@ -514,10 +708,11 @@ private:
             if (auto* property = ic->property(std::string(kPropertyName));
                 property != nullptr) {
                 auto& state = *static_cast<NexKeyState*>(property);
-                state.engine.discard();
+                commit_all(ic, state);
                 if (state.generation != generation_) {
                     state.generation = generation_;
                     state.engine.set_options(settings_.options);
+                    state.engine.set_macros(settings_.macros);
                 }
                 update_preedit(ic, state);
             }

@@ -9,6 +9,10 @@
 #include "nexkey/Unicode.hpp"
 
 #include <algorithm>
+#include <cctype>
+#include <chrono>
+#include <cstring>
+#include <ctime>
 
 namespace nexkey {
 
@@ -48,6 +52,9 @@ std::string render_with(std::string_view raw, const Options& options)
     if (raw.empty()) {
         return {};
     }
+    if (raw.front() == ':' || raw.front() == '<' || raw.front() == '(') {
+        return std::string(raw);
+    }
     const auto word = detail::parse(options.method, raw, options);
     if (options.english_fallback && !word.escaped &&
         !detail::is_plausible(word.to_letters())) {
@@ -61,6 +68,55 @@ bool contains(const std::vector<Candidate>& candidates, const std::string& text)
     return std::ranges::any_of(candidates, [&text](const Candidate& candidate) {
         return candidate.text == text;
     });
+}
+
+std::string expand_macro_text(std::string text, std::string_view raw, const Options& options)
+{
+    if (text.empty()) {
+        return text;
+    }
+
+    if (text.find("$TIME") != std::string::npos || text.find("$DATE") != std::string::npos) {
+        const auto now = std::chrono::system_clock::now();
+        const auto time_t = std::chrono::system_clock::to_time_t(now);
+        std::tm tm{};
+        localtime_r(&time_t, &tm);
+
+        char time_buf[32];
+        std::strftime(time_buf, sizeof(time_buf), "%H:%M", &tm);
+
+        char date_buf[32];
+        std::strftime(date_buf, sizeof(date_buf), "%d/%m/%Y", &tm);
+
+        std::size_t pos = 0;
+        while ((pos = text.find("$TIME", pos)) != std::string::npos) {
+            text.replace(pos, 5, time_buf);
+            pos += std::strlen(time_buf);
+        }
+        pos = 0;
+        while ((pos = text.find("$DATE", pos)) != std::string::npos) {
+            text.replace(pos, 5, date_buf);
+            pos += std::strlen(date_buf);
+        }
+    }
+
+    if (options.capitalize_macro && !raw.empty()) {
+        bool all_upper = true;
+        for (char c : raw) {
+            if (std::isalpha(static_cast<unsigned char>(c)) && !std::isupper(static_cast<unsigned char>(c))) {
+                all_upper = false;
+                break;
+            }
+        }
+        if (all_upper && raw.size() >= 2) {
+            for (char& c : text) {
+                c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+            }
+        } else if (std::isupper(static_cast<unsigned char>(raw.front())) && !text.empty()) {
+            text.front() = static_cast<char>(std::toupper(static_cast<unsigned char>(text.front())));
+        }
+    }
+    return text;
 }
 
 } // namespace
@@ -149,9 +205,100 @@ Step Engine::type(char32_t code_point)
         return step;
     }
 
+    if (m_raw.empty() && (code_point == ':' || code_point == '<' || code_point == '(')) {
+        m_history.push_back(m_raw);
+        m_raw.push_back(static_cast<char>(code_point));
+        m_preedit = m_raw;
+        return Step{std::string{}, m_preedit, true};
+    }
+
+    if (!m_raw.empty() && m_raw.front() == ':') {
+        if (code_point == ':') {
+            m_raw.push_back(':');
+            Step step;
+            if (auto it = m_macros.find(m_raw); it != m_macros.end()) {
+                step.commit = it->second;
+            } else {
+                std::string lower_raw = m_raw;
+                for (char& c : lower_raw) {
+                    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                }
+                if (auto it_low = m_macros.find(lower_raw); it_low != m_macros.end()) {
+                    step.commit = it_low->second;
+                } else {
+                    step.commit = m_raw;
+                }
+            }
+            step.handled = true;
+            reset_state();
+            return step;
+        }
+        if (code_point == ' ' || code_point == '\t') {
+            Step step;
+            if (auto it = m_macros.find(m_raw); it != m_macros.end()) {
+                step.commit = it->second;
+            } else {
+                std::string lower_raw = m_raw;
+                for (char& c : lower_raw) {
+                    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                }
+                if (auto it_low = m_macros.find(lower_raw); it_low != m_macros.end()) {
+                    step.commit = it_low->second;
+                } else {
+                    step.commit = m_raw;
+                }
+            }
+            step.commit.push_back(static_cast<char>(code_point));
+            step.handled = true;
+            reset_state();
+            return step;
+        }
+        m_history.push_back(m_raw);
+        m_raw.push_back(static_cast<char>(code_point));
+        recompute();
+        return Step{std::string{}, m_preedit, true};
+    }
+
+    if (!m_raw.empty() && (m_raw.front() == '<' || m_raw.front() == '(')) {
+        if (code_point == ' ' || code_point == '\t') {
+            Step step;
+            if (auto it = m_macros.find(m_raw); it != m_macros.end()) {
+                step.commit = it->second;
+            } else {
+                step.commit = m_raw;
+            }
+            step.commit.push_back(static_cast<char>(code_point));
+            step.handled = true;
+            reset_state();
+            return step;
+        }
+        if (m_raw.size() < 6) {
+            m_history.push_back(m_raw);
+            m_raw.push_back(static_cast<char>(code_point));
+            recompute();
+            return Step{std::string{}, m_preedit, true};
+        }
+    }
+
     if (detail::is_word_boundary(code_point, m_options)) {
         Step step;
-        step.commit = m_preedit;
+        std::string word = m_preedit;
+        if (m_options.macro_enabled && !m_macros.empty()) {
+            if (auto it = m_macros.find(m_raw); it != m_macros.end()) {
+                word = expand_macro_text(it->second, m_raw, m_options);
+            } else if (auto it_pre = m_macros.find(m_preedit); it_pre != m_macros.end()) {
+                word = expand_macro_text(it_pre->second, m_raw, m_options);
+            } else {
+                std::string lower_raw = m_raw;
+                for (char& c : lower_raw) {
+                    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                }
+                if (auto it_low = m_macros.find(lower_raw); it_low != m_macros.end()) {
+                    word = expand_macro_text(it_low->second, m_raw, m_options);
+                }
+            }
+        }
+        step.commit = std::move(word);
         step.commit.push_back(static_cast<char>(code_point));
         step.handled = true;
         reset_state();

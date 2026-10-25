@@ -121,3 +121,38 @@ TEST(engine_plausibility)
     EXPECT_TRUE(engine.plausible("ng"));
     EXPECT_FALSE(engine.plausible("windows"));
 }
+
+TEST(engine_macro_expansion)
+{
+    nexkey::Engine engine;
+    engine.set_macros({{"vn", "Việt Nam"}, {"ko", "không"}});
+    feed(engine, "vn");
+    const auto step = engine.type(' ');
+    EXPECT_EQ(step.commit, std::string("Việt Nam "));
+    EXPECT_FALSE(engine.composing());
+}
+
+TEST(engine_emoji_shortcuts)
+{
+    nexkey::Engine engine;
+    engine.set_macros({{":fire:", "🔥"}, {":)", "😊"}, {"<3", "❤️"}});
+
+    // Instant colon emoji completion
+    feed(engine, ":fire");
+    const auto step_fire = engine.type(':');
+    EXPECT_EQ(step_fire.commit, std::string("🔥"));
+    EXPECT_FALSE(engine.composing());
+
+    // Smiley on space
+    feed(engine, ":)");
+    const auto step_smile = engine.type(' ');
+    EXPECT_EQ(step_smile.commit, std::string("😊 "));
+    EXPECT_FALSE(engine.composing());
+
+    // Heart on space
+    feed(engine, "<3");
+    const auto step_heart = engine.type(' ');
+    EXPECT_EQ(step_heart.commit, std::string("❤️ "));
+    EXPECT_FALSE(engine.composing());
+}
+
