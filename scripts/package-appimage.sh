@@ -62,10 +62,13 @@ jobs="$(nproc 2>/dev/null || echo 2)"
 
 if [ "${skip_build}" -eq 0 ]; then
     log "Configuring a Release build in ${build_dir}"
+    # The IBus component file points at an absolute engine path, which cannot
+    # work inside an image, so IBus is left to the distribution package.
     cmake -S "${root}" -B "${build_dir}" \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_INSTALL_PREFIX=/usr \
-        -DNEXKEY_BUILD_TESTS=OFF
+        -DNEXKEY_BUILD_TESTS=OFF \
+        -DNEXKEY_BUILD_IBUS=OFF
 
     log "Building"
     cmake --build "${build_dir}" --parallel "${jobs}"

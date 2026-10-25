@@ -34,7 +34,8 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build dpkg-dev file ${QT_PACKAGES} libfcitx5core-dev
+          sudo apt-get install -y cmake ninja-build dpkg-dev file ${QT_PACKAGES} \
+            libfcitx5core-dev libibus-1.0-dev
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DNEXKEY_WARNINGS_AS_ERRORS=ON
       - name: Build
@@ -48,6 +49,28 @@ jobs:
           fi
       - name: Test
         run: ctest --test-dir build --output-on-failure
+      - name: Check the input method backends
+        run: |
+          set -e
+          test -x build/integrations/ibus/nexkey-ibus
+          test -f build/integrations/fcitx5/nexkey.so
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          root = ET.parse("build/integrations/ibus/nexkey.xml").getroot()
+          engine = root.find("engines/engine")
+          assert root.findtext("name") == "org.freedesktop.IBus.NexKey"
+          assert engine.findtext("name") == "nexkey"
+          assert root.findtext("exec").endswith("/nexkey/nexkey-ibus")
+          print("component xml exec:", root.findtext("exec"))
+          PY
+          # Without a running IBus daemon the engine must fail cleanly.
+          if timeout 15 build/integrations/ibus/nexkey-ibus > ibus.log 2>&1; then
+            echo "::error::the engine started without an IBus daemon"
+            exit 1
+          else
+            cat ibus.log
+            grep -q "cannot connect to the IBus daemon" ibus.log
+          fi
       - name: Build the Debian package
         run: cmake --build build --target package
       - name: Inspect the package
@@ -59,6 +82,8 @@ jobs:
           printf '%s\n' "$contents" | grep -E 'fcitx5/nexkey\.so'
           printf '%s\n' "$contents" | grep -E 'usr/share/applications/nexkey.desktop'
           printf '%s\n' "$contents" | grep -E 'usr/share/nexkey/nexkey-autostart.desktop'
+          printf '%s\n' "$contents" | grep -E 'usr/lib/[^/]+/nexkey/nexkey-ibus'
+          printf '%s\n' "$contents" | grep -E 'usr/share/ibus/component/nexkey.xml'
 
           depends="$(dpkg-deb --field build/*.deb Depends)"
           echo "Depends: $depends"
@@ -66,6 +91,8 @@ jobs:
             || { echo "::error::the Qt6 runtime dependency is missing"; exit 1; }
           printf '%s' "$depends" | grep -Eq 'libfcitx5core' \
             || { echo "::error::the Fcitx5 runtime dependency is missing"; exit 1; }
+          printf '%s' "$depends" | grep -Eq 'libibus-1.0-5' \
+            || { echo "::error::the IBus runtime dependency is missing"; exit 1; }
           dpkg-deb --field build/*.deb Recommends | grep -q fcitx5 \
             || { echo "::error::fcitx5 is not a recommended package"; exit 1; }
 
@@ -88,7 +115,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build ${QT_PACKAGES} libfcitx5core-dev
+          sudo apt-get install -y cmake ninja-build ${QT_PACKAGES} libfcitx5core-dev libibus-1.0-dev
       - name: Build the AppImage
         run: ./scripts/package-appimage.sh --output-dir dist
       - name: Verify the image contents

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: MIT -->
+<component>
+  <name>org.freedesktop.IBus.NexKey</name>
+  <description>Vietnamese input method</description>
+  <exec>@NEXKEY_IBUS_ENGINE_PATH@</exec>
+  <version>@PROJECT_VERSION@</version>
+  <author>Hyggshi OS Research Technology</author>
+  <license>MIT</license>
+  <homepage>https://github.com/Hyggshi-OS-Research-Technology/Nexkey</homepage>
+  <textdomain>nexkey</textdomain>
+  <engines>
+    <engine>
+      <name>nexkey</name>
+      <longname>NexKey</longname>
+      <language>vi</language>
+      <license>MIT</license>
+      <author>Hyggshi OS Research Technology</author>
+      <icon>/usr/share/icons/hicolor/scalable/status/nexkey-vn.svg</icon>
+      <layout>default</layout>
+      <description>Telex, VNI and VIQR with Unicode, NFD, TCVN3 and VIQR output</description>
+      <rank>1</rank>
+      <symbol>VN</symbol>
+    </engine>
+  </engines>
+</component>

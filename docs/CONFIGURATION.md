@@ -82,8 +82,8 @@ the AppImage, a normal per user entry is written instead.
 
 ## Candidate window
 
-While a word is being composed the Fcitx5 addon shows the alternative readings
-of the keystrokes, so the user can pick one instead of relying on the default:
+While a word is being composed both backends show the alternative readings of
+the keystrokes, so the user can pick one instead of relying on the default:
 
 | Entry | Meaning |
 | --- | --- |
@@ -147,8 +147,11 @@ busctl --user call org.nexkey.Daemon /org/nexkey/Daemon org.nexkey.Daemon Toggle
 Starting `nexkey-gui` a second time forwards the request to the running
 instance and opens its settings window.
 
-## Fcitx5
+## Fcitx5 and IBus
 
-The addon rereads the configuration file when it changes, so no restart is
+Both backends reread the configuration file when it changes, so no restart is
 needed after `nexkey config set`. The mode may also be switched with the
-configured toggle key, from the tray icon or over D-Bus.
+configured toggle key, from the tray icon, over D-Bus or from the menu item of
+the input method panel.
+
+The IBus engine is documented separately in [IBUS.md](IBUS.md).

@@ -36,6 +36,7 @@ if(NEXKEY_INSTALL_DOCS)
         ${CMAKE_CURRENT_SOURCE_DIR}/docs/CONFIGURATION.md
         ${CMAKE_CURRENT_SOURCE_DIR}/docs/ARCHITECTURE.md
         ${CMAKE_CURRENT_SOURCE_DIR}/docs/PACKAGING.md
+        ${CMAKE_CURRENT_SOURCE_DIR}/docs/IBUS.md
         DESTINATION ${CMAKE_INSTALL_DOCDIR}
     )
 endif()
@@ -71,6 +72,9 @@ else()
     endif()
     if(Fcitx5Core_FOUND)
         string(APPEND _nexkey_depends ", libfcitx5core7 | libfcitx5core0")
+    endif()
+    if(IBus_FOUND)
+        string(APPEND _nexkey_depends ", libibus-1.0-5")
     endif()
     set(CPACK_DEBIAN_PACKAGE_DEPENDS "${_nexkey_depends}")
 endif()

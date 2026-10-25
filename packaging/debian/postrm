@@ -12,4 +12,8 @@ if command -v fcitx5-remote >/dev/null 2>&1; then
     fcitx5-remote -r >/dev/null 2>&1 || true
 fi
 
+if command -v ibus >/dev/null 2>&1; then
+    ibus write-cache --system >/dev/null 2>&1 || true
+fi
+
 exit 0

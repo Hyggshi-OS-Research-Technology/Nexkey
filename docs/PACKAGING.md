@@ -26,11 +26,13 @@ Contents:
 /usr/bin/nexkey-gui                            tray application
 /usr/bin/nexkey                                command line tool
 /usr/lib/<triplet>/fcitx5/nexkey.so            Fcitx5 input method addon
+/usr/lib/<triplet>/nexkey/nexkey-ibus          IBus input method engine
 /usr/lib/<triplet>/libnexkey-core.a            static core library
 /usr/include/nexkey/*.hpp                      public headers
 /usr/lib/<triplet>/cmake/NexKey/               CMake package files
 /usr/share/fcitx5/addon/nexkey-addon.conf
 /usr/share/fcitx5/inputmethod/nexkey.conf
+/usr/share/ibus/component/nexkey.xml           IBus component description
 /usr/share/applications/nexkey.desktop
 /usr/share/nexkey/nexkey-autostart.desktop     template for the autostart entry
 /usr/share/icons/hicolor/scalable/...
@@ -42,7 +44,7 @@ The maintainer scripts do the following:
 
 | Script | Work |
 | --- | --- |
-| `postinst` | installs `/etc/xdg/autostart/nexkey.desktop` from the shipped template, refreshes the desktop, icon and Fcitx5 caches, prints the next steps |
+| `postinst` | installs `/etc/xdg/autostart/nexkey.desktop` from the shipped template, refreshes the desktop, icon, Fcitx5 and IBus caches, prints the next steps |
 | `postrm` | removes the autostart entry, refreshes the caches |
 
 ### Dependencies
@@ -55,15 +57,27 @@ components that were enabled:
 
 ```
 Depends: libc6, libstdc++6, libqt6core6t64 | libqt6core6, ...,
-         libfcitx5core7 | libfcitx5core0
+         libfcitx5core7 | libfcitx5core0, libibus-1.0-5
 Recommends: fcitx5, fcitx5-frontend-gtk3 | fcitx5-frontend-gtk4 |
             fcitx5-frontend-qt5 | fcitx5-frontend-qt6
 Suggests: fcitx5-config-qt
 ```
 
-`Recommends` is where the actual input method daemon and the toolkit frontends
-live: the addon is useless without Fcitx5, but a user who only wants the CLI can
-still install the package.
+`Recommends` is where the actual input method daemons and the toolkit frontends
+live: the backends are useless without Fcitx5 or IBus, but a user who only wants
+the CLI can still install the package.
+
+### Which backends go where
+
+| Format | Fcitx5 addon | IBus engine |
+| --- | --- | --- |
+| `.deb` | yes | yes |
+| AppImage | yes | no |
+
+An IBus component file has to name the engine binary by absolute path
+(`/usr/lib/<triplet>/nexkey/nexkey-ibus`), which does not exist inside an
+AppImage, so the image is built with `-DNEXKEY_BUILD_IBUS=OFF` and users who
+want IBus install the package.
 
 ### Autostart
 
@@ -156,9 +170,12 @@ the AppImage and a distribution package share the same settings.
 | `full` | Builds everything with Qt6 and Fcitx5, runs the tests, builds and inspects the Debian package |
 | `appimage` | Builds the AppImage, extracts it and checks the layout, the bundled libraries and the CLI |
 
-The `full` job also checks the produced package: the tray binary, the addon, the
-desktop file and the autostart template must be inside, `Depends` must mention
-the Qt6 and Fcitx5 libraries, and the extracted CLI must run.
+The `full` job also checks the produced package: the tray binary, the Fcitx5
+addon, the IBus engine, the component file, the desktop file and the autostart
+template must be inside, `Depends` must mention the Qt6, Fcitx5 and IBus
+libraries, the component XML must parse and name the right engine path, the
+extracted CLI must run, and the IBus engine must exit cleanly with an error when
+no daemon is running.
 
 The AppImage job verifies the image contents before uploading, so a broken
 bundle fails the build instead of reaching users:
