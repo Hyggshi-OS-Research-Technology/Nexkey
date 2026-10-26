@@ -3,6 +3,7 @@ add_library(nexkey-core STATIC
     src/Engine.cpp
     src/Grapheme.cpp
     src/Settings.cpp
+    src/Status.cpp
     src/Syllable.cpp
     src/Unicode.cpp
     src/Word.cpp

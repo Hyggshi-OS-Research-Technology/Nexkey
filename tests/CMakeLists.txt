@@ -4,6 +4,7 @@ add_executable(nexkey-tests
     test_candidates.cpp
     test_engine.cpp
     test_settings.cpp
+    test_status.cpp
     test_syllable.cpp
     test_telex.cpp
     test_unicode.cpp

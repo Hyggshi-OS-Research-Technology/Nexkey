@@ -10,8 +10,13 @@
 class QCheckBox;
 class QComboBox;
 class QLineEdit;
-class QTableWidget;
+class QLabel;
+class QListWidget;
+class QPlainTextEdit;
 class QPushButton;
+class QStackedWidget;
+class QTableWidget;
+class QTimer;
 
 class SettingsDialog : public QDialog {
     Q_OBJECT
@@ -30,10 +35,17 @@ private slots:
     void importJson();
     void addAppRule();
     void removeAppRule();
+    void resetToDefaults();
+    void refreshDiagnostics();
+    void copyDiagnostics();
 
 private:
-    void apply();
+    bool apply();
     void load(const nexkey::Settings& settings);
+
+    // Layout: sidebar on the left, pages on the right.
+    QListWidget* m_sidebar{};
+    QStackedWidget* m_pages{};
 
     QComboBox* m_method{};
     QComboBox* m_toneStyle{};
@@ -68,6 +80,12 @@ private:
     QCheckBox* m_bakCustomDict{};
     QPushButton* m_exportBtn{};
     QPushButton* m_importBtn{};
+
+    // Diagnostics
+    QLabel* m_diagSummary{};
+    QPlainTextEdit* m_diagReport{};
+    QTimer* m_diagTimer{};
+    int m_diagIndex{-1};
 
     nexkey::Settings m_settings;
 };

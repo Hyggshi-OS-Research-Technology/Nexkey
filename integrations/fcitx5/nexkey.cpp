@@ -3,6 +3,7 @@
 
 #include "nexkey/Engine.hpp"
 #include "nexkey/Settings.hpp"
+#include "nexkey/Status.hpp"
 #include "nexkey/Types.hpp"
 #include "nexkey/Unicode.hpp"
 
@@ -23,8 +24,12 @@
 #include <fcitx/text.h>
 #include <fcitx/userinterface.h>
 
+#include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
+#include <ctime>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -125,6 +130,8 @@ public:
     unsigned generation{0};
     /// Characters already committed directly to the client in direct typing mode.
     std::string committed_text;
+    /// Times at which the document did not contain what direct typing wrote.
+    std::vector<std::chrono::steady_clock::time_point> mismatches;
 };
 
 inline std::size_t utf8_char_count(std::string_view text) noexcept
@@ -181,6 +188,27 @@ inline CommonPrefix utf8_common_prefix(std::string_view a, std::string_view b) n
         ++char_count;
     }
     return {char_count, i};
+}
+
+/// The first `chars` characters of a UTF-8 string.
+inline std::string utf8_prefix_chars(std::string_view text, std::size_t chars)
+{
+    std::size_t i = 0;
+    std::size_t seen = 0;
+    while (i < text.size() && seen < chars) {
+        const auto c = static_cast<unsigned char>(text[i]);
+        std::size_t len = 1;
+        if ((c & 0xE0) == 0xC0) {
+            len = 2;
+        } else if ((c & 0xF0) == 0xE0) {
+            len = 3;
+        } else if ((c & 0xF8) == 0xF0) {
+            len = 4;
+        }
+        i = std::min(i + len, text.size());
+        ++seen;
+    }
+    return std::string(text.substr(0, i));
 }
 
 void delete_characters(fcitx::InputContext* ic, std::size_t count)
@@ -316,11 +344,33 @@ public:
             }
         }
 
+        // Verify that earlier direct typing really reached the document, learn
+        // from applications where it does not, and publish the status for the
+        // diagnostics page.
+        check_direct_health(ic, state);
+        publish_status(ic, state);
+
         if (key.sym() == FcitxKey_BackSpace) {
             const auto step = state.engine.backspace();
             if (!step.handled) {
                 commit_all(ic, state);
                 return;
+            }
+            if (use_direct_typing(ic)) {
+                // Pure deletion of the last character (e.g. "kh" -> "k"): let the
+                // application handle its own BackSpace instead of relying on
+                // deleteSurroundingText, which many clients silently ignore.
+                const std::string new_preedit(state.engine.preedit());
+                const std::string& old_text = state.committed_text;
+                if (new_preedit.size() < old_text.size() &&
+                    old_text.compare(0, new_preedit.size(), new_preedit) == 0 &&
+                    utf8_char_count(old_text) - utf8_char_count(new_preedit) == 1) {
+                    state.committed_text = new_preedit;
+                    ic->inputPanel().setClientPreedit(fcitx::Text{});
+                    update_candidates(ic, state);
+                    ic->updatePreedit();
+                    return; // key not filtered: the app deletes the character
+                }
             }
             update_preedit(ic, state);
             event.filterAndAccept();
@@ -375,6 +425,7 @@ public:
         if (auto* ic = event.inputContext(); ic != nullptr) {
             auto& state = state_of(ic);
             commit_all(ic, state);
+            publish_status(ic, state);
         }
     }
 
@@ -435,22 +486,153 @@ private:
         return *state;
     }
 
-    bool use_direct_typing(fcitx::InputContext* ic) const
+    struct DirectDecision {
+        bool direct{true};
+        const char* reason{""};
+    };
+
+    /// Decide between direct typing and preedit for one input context.
+    DirectDecision direct_decision(fcitx::InputContext* ic) const
     {
         if (!settings_.options.direct_typing) {
-            return false;
+            return {false, "Đã tắt gõ trực tiếp trong cài đặt"};
         }
-        if (ic != nullptr) {
-            if (ic->program() == "gnome-text-editor") {
-                return false;
-            }
-            if (auto it = settings_.app_rules.find(ic->program()); it != settings_.app_rules.end()) {
-                if (it->second == "preedit") {
-                    return false;
+        if (ic == nullptr) {
+            return {true, "Mặc định"};
+        }
+        const std::string& program = ic->program();
+        if (auto it = settings_.app_rules.find(program); it != settings_.app_rules.end()) {
+            if (it->second == "preedit") {
+                if (!last_learned_.empty() && program == last_learned_) {
+                    return {false, "Tự học: xóa/thay chữ không hiệu lực ở ứng dụng này"};
                 }
+                return {false, "Quy tắc ứng dụng: preedit"};
+            }
+            if (it->second == "direct") {
+                return {true, "Quy tắc ứng dụng: direct"};
             }
         }
-        return true;
+        if (program == "gnome-text-editor") {
+            return {false, "Danh sách có sẵn (gnome-text-editor)"};
+        }
+        // Chromium / Electron based programs ignore deleteSurroundingText, so
+        // direct typing cannot replace or delete characters there.
+        std::string lower = program;
+        for (char& c : lower) {
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        }
+        for (const char* needle : {"chrome", "chromium", "brave", "firefox", "electron",
+                                   "code", "discord", "slack", "obsidian"}) {
+            if (lower.find(needle) != std::string::npos) {
+                return {false, "Danh sách có sẵn (Chromium/Electron)"};
+            }
+        }
+        return {true, "Mặc định"};
+    }
+
+    bool use_direct_typing(fcitx::InputContext* ic) const
+    {
+        return direct_decision(ic).direct;
+    }
+
+    /// Compare the document with what direct typing believes it wrote. Three
+    /// mismatches within a minute mean the application ignores deletions, so
+    /// it is switched to preedit for good.
+    void check_direct_health(fcitx::InputContext* ic, NexKeyState& state)
+    {
+        const auto now = std::chrono::steady_clock::now();
+        std::erase_if(state.mismatches, [now](const auto& when) { return now - when > 60s; });
+
+        if (state.committed_text.empty() || !use_direct_typing(ic)) {
+            return;
+        }
+        if (!ic->capabilityFlags().test(fcitx::CapabilityFlag::SurroundingText)) {
+            return;
+        }
+        const auto& surrounding = ic->surroundingText();
+        if (!surrounding.isValid() || surrounding.cursor() != surrounding.anchor()) {
+            return;
+        }
+
+        const std::string before = utf8_prefix_chars(surrounding.text(), surrounding.cursor());
+        const std::string& expected = state.committed_text;
+        if (before.size() >= expected.size() &&
+            before.compare(before.size() - expected.size(), expected.size(), expected) == 0) {
+            return;
+        }
+
+        // The document does not hold what was typed: the cursor may simply have
+        // moved, so only drop the composition and count the event.
+        state.mismatches.push_back(now);
+        commit_all(ic, state);
+        if (state.mismatches.size() >= 3) {
+            learn_preedit(ic, state);
+        }
+    }
+
+    /// Remember that direct typing does not work in this application.
+    void learn_preedit(fcitx::InputContext* ic, NexKeyState& state)
+    {
+        const std::string program = ic->program();
+        if (program.empty()) {
+            return;
+        }
+        // Still in direct mode here, so this drops the state without committing.
+        commit_all(ic, state);
+
+        settings_.app_rules[program] = "preedit";
+        ++generation_;
+        last_learned_ = program;
+        last_learned_at_ = static_cast<std::int64_t>(std::time(nullptr));
+        state.mismatches.clear();
+        if (!nexkey::save_settings(settings_)) {
+            FCITX_WARN() << "NexKey: could not save the learned rule for " << program;
+        }
+        FCITX_INFO() << "NexKey: switched " << program << " to preedit mode";
+        publish_status(ic, state);
+    }
+
+    /// Write the diagnostics snapshot, at most when something changed or every
+    /// few seconds.
+    void publish_status(fcitx::InputContext* ic, NexKeyState& state)
+    {
+        if (ic == nullptr) {
+            return;
+        }
+        const std::string program = ic->program();
+        if (program.empty() || program == "nexkey-gui") {
+            return;
+        }
+
+        const auto decision = direct_decision(ic);
+        const bool capability =
+            ic->capabilityFlags().test(fcitx::CapabilityFlag::SurroundingText);
+        const bool valid = capability && ic->surroundingText().isValid();
+        const int recent = static_cast<int>(state.mismatches.size());
+
+        const std::string key = program + '|' + (decision.direct ? 'd' : 'p') + '|' +
+                                decision.reason + '|' + (capability ? '1' : '0') +
+                                (valid ? '1' : '0') + std::to_string(recent) + last_learned_;
+        const auto now = std::chrono::steady_clock::now();
+        if (key == last_status_key_ && now - last_status_write_ < 5s) {
+            return;
+        }
+        last_status_key_ = key;
+        last_status_write_ = now;
+
+        nexkey::RuntimeStatus status;
+        status.program = program;
+        status.mode = decision.direct ? "direct" : "preedit";
+        status.reason = decision.reason;
+        status.surrounding_capability = capability;
+        status.surrounding_valid = valid;
+        status.recent_mismatches = recent;
+        status.addon_version = std::string(nexkey::kVersion);
+        status.addon_build = std::string(nexkey::build_id());
+        status.updated = static_cast<std::int64_t>(std::time(nullptr));
+        status.last_learned = last_learned_;
+        status.last_learned_at = last_learned_at_;
+        static_cast<void>(nexkey::write_status(status));
     }
 
     void commit_all(fcitx::InputContext* ic, NexKeyState& state)
@@ -751,6 +933,10 @@ private:
     ToggleKey toggle_;
     fcitx::FactoryFor<NexKeyState> state_factory_;
     unsigned generation_{0};
+    std::string last_learned_;
+    std::int64_t last_learned_at_{0};
+    std::string last_status_key_;
+    std::chrono::steady_clock::time_point last_status_write_{};
     std::filesystem::file_time_type config_time_{};
     std::chrono::steady_clock::time_point last_check_{};
 };

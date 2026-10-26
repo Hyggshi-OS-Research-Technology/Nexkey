@@ -4,13 +4,18 @@
 #include "SettingsDialog.hpp"
 
 #include "Autostart.hpp"
+#include "Diagnostics.hpp"
 #include "QtHelpers.hpp"
 
 #include <QCheckBox>
 #include <QComboBox>
-#include <QDialogButtonBox>
+#include <QClipboard>
+#include <QDesktopServices>
 #include <QFileDialog>
 #include <QFormLayout>
+#include <QFontDatabase>
+#include <QFrame>
+#include <QGuiApplication>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -18,10 +23,18 @@
 #include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
+#include <QListWidget>
 #include <QMessageBox>
+#include <QPlainTextEdit>
 #include <QPushButton>
-#include <QTabWidget>
+#include <QScrollArea>
+#include <QScrollBar>
+#include <QSizePolicy>
+#include <QStackedWidget>
+#include <QStyle>
+#include <QTimer>
 #include <QTableWidget>
+#include <QUrl>
 #include <QVBoxLayout>
 
 #include <utility>
@@ -37,15 +50,84 @@ void fill_combo(QComboBox* combo, const std::vector<std::pair<QString, int>>& en
     }
 }
 
+/// Theme icon with a Qt standard icon as fallback.
+QIcon themed_icon(const QStringList& names, const QStyle* style, QStyle::StandardPixmap fallback)
+{
+    for (const auto& name : names) {
+        if (QIcon::hasThemeIcon(name)) {
+            return QIcon::fromTheme(name);
+        }
+    }
+    return style->standardIcon(fallback);
+}
+
+/// Put a page into a frameless scroll area so small windows stay usable.
+QScrollArea* wrap_page(QWidget* page, QWidget* parent)
+{
+    auto* scroll = new QScrollArea(parent);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setWidgetResizable(true);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setWidget(page);
+    return scroll;
+}
+
+void prepare_page_layout(QVBoxLayout* layout)
+{
+    layout->setContentsMargins(24, 20, 24, 20);
+    layout->setSpacing(14);
+}
+
+const QString kRepoUrl = QStringLiteral("https://github.com/Hyggshi-OS-Research-Technology/Nexkey");
+const QString kOrgUrl = QStringLiteral("https://github.com/Hyggshi-OS-Research-Technology");
+
+const char* const kStyleSheet = R"(
+QListWidget#sidebar {
+    background: palette(base);
+    border: 1px solid palette(mid);
+    border-radius: 8px;
+    padding: 6px;
+    outline: 0;
+}
+QListWidget#sidebar::item {
+    padding: 10px 8px;
+    margin: 2px 0;
+    border-radius: 10px;
+}
+QListWidget#sidebar::item:hover:!selected {
+    background: palette(alternate-base);
+}
+QListWidget#sidebar::item:selected,
+QListWidget#sidebar::item:selected:!active {
+    background: #e95420;
+    color: white;
+}
+QLabel#aboutTitle {
+    font-size: 30px;
+}
+QLabel#versionBadge {
+    background: #e95420;
+    color: white;
+    font-weight: 600;
+    padding: 6px 16px;
+    border-radius: 3px;
+}
+QPushButton#okButton {
+    font-weight: 600;
+}
+)";
+
 } // namespace
 
 SettingsDialog::SettingsDialog(const nexkey::Settings& settings, QWidget* parent)
     : QDialog(parent)
     , m_settings(settings)
 {
-    setWindowTitle(tr("NexKey Settings"));
+    setWindowTitle(tr("Cài đặt NexKey"));
     setWindowIcon(QIcon(QStringLiteral(":/icons/nexkey.svg")));
-    resize(520, 480);
+    resize(860, 640);
+    setMinimumSize(720, 520);
+    setStyleSheet(QString::fromUtf8(kStyleSheet));
 
     // ==========================================
     // 1. INPUT TAB (Kiểu gõ & Presets)
@@ -72,6 +154,7 @@ SettingsDialog::SettingsDialog(const nexkey::Settings& settings, QWidget* parent
 
     auto* inputPage = new QWidget(this);
     auto* inputLayout = new QVBoxLayout(inputPage);
+    prepare_page_layout(inputLayout);
 
     auto* inputForm = new QFormLayout();
     inputForm->addRow(tr("Input method (Kiểu gõ)"), m_method);
@@ -119,15 +202,24 @@ SettingsDialog::SettingsDialog(const nexkey::Settings& settings, QWidget* parent
 
     auto* enginePage = new QWidget(this);
     auto* engineLayout = new QVBoxLayout(enginePage);
-    engineLayout->addWidget(m_directTyping);
-    engineLayout->addWidget(m_englishFallback);
-    engineLayout->addWidget(m_spellCheck);
-    engineLayout->addWidget(m_macroEnabled);
-    engineLayout->addWidget(m_capitalizeMacro);
-    engineLayout->addWidget(m_customDict);
-    engineLayout->addWidget(m_smartBackspace);
-    engineLayout->addWidget(m_bracketShortcuts);
-    engineLayout->addWidget(m_candidates);
+    prepare_page_layout(engineLayout);
+
+    auto* typingGroup = new QGroupBox(tr("Gõ và chính tả"), enginePage);
+    auto* typingLayout = new QVBoxLayout(typingGroup);
+    typingLayout->addWidget(m_directTyping);
+    typingLayout->addWidget(m_englishFallback);
+    typingLayout->addWidget(m_spellCheck);
+    typingLayout->addWidget(m_smartBackspace);
+    typingLayout->addWidget(m_bracketShortcuts);
+    typingLayout->addWidget(m_candidates);
+    engineLayout->addWidget(typingGroup);
+
+    auto* macroGroup = new QGroupBox(tr("Gõ tắt và từ điển"), enginePage);
+    auto* macroLayout = new QVBoxLayout(macroGroup);
+    macroLayout->addWidget(m_macroEnabled);
+    macroLayout->addWidget(m_capitalizeMacro);
+    macroLayout->addWidget(m_customDict);
+    engineLayout->addWidget(macroGroup);
 
     auto* macroFmtGroup = new QGroupBox(tr("Gõ tắt $TIME / $DATE Format"), enginePage);
     auto* macroFmtLayout = new QFormLayout(macroFmtGroup);
@@ -141,7 +233,9 @@ SettingsDialog::SettingsDialog(const nexkey::Settings& settings, QWidget* parent
     // ==========================================
     auto* appPage = new QWidget(this);
     auto* appLayout = new QVBoxLayout(appPage);
-    auto* appDesc = new QLabel(tr("Gán chế độ gõ riêng cho từng ứng dụng hoặc từng cửa sổ:"), appPage);
+    prepare_page_layout(appLayout);
+    auto* appDesc = new QLabel(tr("Gán chế độ gõ riêng cho từng ứng dụng. Chế độ \"preedit\" dùng gạch chân (ổn định "
+                                   "cho Chrome/Electron), \"direct\" gõ trực tiếp, \"off\" tắt bộ gõ:"), appPage);
     appDesc->setWordWrap(true);
     appLayout->addWidget(appDesc);
 
@@ -166,6 +260,7 @@ SettingsDialog::SettingsDialog(const nexkey::Settings& settings, QWidget* parent
     // ==========================================
     auto* backupPage = new QWidget(this);
     auto* backupLayout = new QVBoxLayout(backupPage);
+    prepare_page_layout(backupLayout);
 
     auto* bakDesc = new QLabel(tr("Xuất/nhập toàn bộ cấu hình dạng file JSON, chọn lọc từng thành phần:"), backupPage);
     bakDesc->setWordWrap(true);
@@ -174,7 +269,7 @@ SettingsDialog::SettingsDialog(const nexkey::Settings& settings, QWidget* parent
     auto* bakGroup = new QGroupBox(tr("Thành phần sao lưu"), backupPage);
     auto* bakGroupLayout = new QVBoxLayout(bakGroup);
     m_bakMainSettings = new QCheckBox(tr("Main Settings (Cấu hình chung)"), bakGroup);
-    m_bakMacros = new QCheckBox(tr("Macros (Gõ tắt & Emoji)"), bakGroup);
+    m_bakMacros = new QCheckBox(tr("Macros (Gõ tắt và Emoji)"), bakGroup);
     m_bakKeymaps = new QCheckBox(tr("Custom Keymaps (Preset bàn phím)"), bakGroup);
     m_bakAppRules = new QCheckBox(tr("App Rules (Quy tắc ứng dụng)"), bakGroup);
     m_bakCustomDict = new QCheckBox(tr("Custom Dictionary (Từ điển cá nhân)"), bakGroup);
@@ -212,49 +307,244 @@ SettingsDialog::SettingsDialog(const nexkey::Settings& settings, QWidget* parent
 
     auto* interfacePage = new QWidget(this);
     auto* interfaceLayout = new QFormLayout(interfacePage);
+    interfaceLayout->setContentsMargins(24, 20, 24, 20);
+    interfaceLayout->setVerticalSpacing(14);
     interfaceLayout->addRow(tr("Toggle key (Phím chuyển VI/EN)"), m_toggleKey);
     interfaceLayout->addRow(QString{}, m_showTrayIcon);
     interfaceLayout->addRow(QString{}, m_startWithSystem);
 
     // ==========================================
-    // 6. ABOUT TAB (Thông tin)
+    // 6. DIAGNOSTICS PAGE (Chẩn đoán)
+    // ==========================================
+    auto* diagPage = new QWidget(this);
+    auto* diagLayout = new QVBoxLayout(diagPage);
+    prepare_page_layout(diagLayout);
+
+    m_diagSummary = new QLabel(diagPage);
+    m_diagSummary->setWordWrap(true);
+    m_diagSummary->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    diagLayout->addWidget(m_diagSummary);
+
+    m_diagReport = new QPlainTextEdit(diagPage);
+    m_diagReport->setReadOnly(true);
+    m_diagReport->setLineWrapMode(QPlainTextEdit::NoWrap);
+    m_diagReport->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    diagLayout->addWidget(m_diagReport, 1);
+
+    auto* diagButtons = new QHBoxLayout();
+    auto* diagRefresh = new QPushButton(tr("Làm mới"), diagPage);
+    auto* diagCopy = new QPushButton(tr("Sao chép báo cáo"), diagPage);
+    connect(diagRefresh, &QPushButton::clicked, this, &SettingsDialog::refreshDiagnostics);
+    connect(diagCopy, &QPushButton::clicked, this, &SettingsDialog::copyDiagnostics);
+    diagButtons->addWidget(diagRefresh);
+    diagButtons->addWidget(diagCopy);
+    diagButtons->addStretch();
+    diagLayout->addLayout(diagButtons);
+
+    m_diagTimer = new QTimer(this);
+    m_diagTimer->setInterval(1500);
+    connect(m_diagTimer, &QTimer::timeout, this, [this] {
+        if (isVisible() && m_sidebar != nullptr && m_sidebar->currentRow() == m_diagIndex) {
+            refreshDiagnostics();
+        }
+    });
+    m_diagTimer->start();
+
+    // ==========================================
+    // 7. ABOUT PAGE (Giới thiệu)
     // ==========================================
     auto* aboutPage = new QWidget(this);
     auto* aboutLayout = new QVBoxLayout(aboutPage);
-    auto* about = new QLabel(tr("NexKey %1\n"
-                               "Bộ gõ tiếng Việt thông minh cho Linux.\n"
-                               "Gõ trực tiếp (Non-preedit, không gạch chân).\n"
-                               "Hỗ trợ Uinput, Wayland & X11, App Rules, Macros, Smart Emoji.\n\n"
-                               "Đường dẫn file cấu hình:\n%2")
-                                 .arg(nexkey::gui::to_qstring(nexkey::kVersion),
-                                      QString::fromStdString(nexkey::default_config_path().string())),
-                            aboutPage);
-    about->setWordWrap(true);
-    aboutLayout->addWidget(about);
+    aboutLayout->setContentsMargins(24, 24, 24, 24);
+    aboutLayout->setSpacing(12);
     aboutLayout->addStretch();
 
-    auto* tabs = new QTabWidget(this);
-    tabs->addTab(inputPage, tr("Kiểu gõ"));
-    tabs->addTab(enginePage, tr("Tính năng"));
-    tabs->addTab(appPage, tr("Ứng dụng"));
-    tabs->addTab(backupPage, tr("Sao lưu & Phục hồi"));
-    tabs->addTab(interfacePage, tr("Giao diện"));
-    tabs->addTab(aboutPage, tr("Thông tin"));
+    auto* logo = new QLabel(aboutPage);
+    logo->setPixmap(QIcon(QStringLiteral(":/icons/nexkey.svg")).pixmap(112, 112));
+    logo->setAlignment(Qt::AlignCenter);
+    aboutLayout->addWidget(logo);
 
-    auto* buttons = new QDialogButtonBox(
-        QDialogButtonBox::Ok | QDialogButtonBox::Cancel | QDialogButtonBox::Apply, this);
+    auto* title = new QLabel(QStringLiteral("NexKey"), aboutPage);
+    title->setObjectName(QStringLiteral("aboutTitle"));
+    title->setAlignment(Qt::AlignCenter);
+    aboutLayout->addWidget(title);
+
+    auto* badge = new QLabel(
+        tr("Phiên bản %1 (Stable)").arg(nexkey::gui::to_qstring(nexkey::kVersion)), aboutPage);
+    badge->setObjectName(QStringLiteral("versionBadge"));
+    badge->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    aboutLayout->addWidget(badge, 0, Qt::AlignHCenter);
+    aboutLayout->addSpacing(10);
+
+    auto* about = new QLabel(tr("Bộ gõ tiếng Việt thông minh cho Linux.\n"
+                                "Gõ trực tiếp (Non-preedit, không gạch chân).\n"
+                                "Hỗ trợ Uinput, Wayland & X11, App Rules, Macros, Smart Emoji."),
+                             aboutPage);
+    about->setAlignment(Qt::AlignCenter);
+    about->setWordWrap(true);
+    aboutLayout->addWidget(about);
+
+    auto* repoLink = new QLabel(QStringLiteral("<a href=\"%1\">%1</a>").arg(kRepoUrl), aboutPage);
+    repoLink->setAlignment(Qt::AlignCenter);
+    repoLink->setTextFormat(Qt::RichText);
+    repoLink->setOpenExternalLinks(true);
+    aboutLayout->addWidget(repoLink);
+
+    auto* linkRow = new QHBoxLayout();
+    linkRow->addStretch();
+    auto* bugBtn = new QPushButton(tr("Báo cáo lỗi"), aboutPage);
+    auto* featureBtn = new QPushButton(tr("Đề xuất tính năng"), aboutPage);
+    bugBtn->setMinimumWidth(180);
+    featureBtn->setMinimumWidth(180);
+    connect(bugBtn, &QPushButton::clicked, this, [] {
+        QDesktopServices::openUrl(QUrl(kRepoUrl + QStringLiteral("/issues/new")));
+    });
+    connect(featureBtn, &QPushButton::clicked, this, [] {
+        QDesktopServices::openUrl(QUrl(kRepoUrl + QStringLiteral("/issues/new?labels=enhancement")));
+    });
+    linkRow->addWidget(bugBtn);
+    linkRow->addWidget(featureBtn);
+    linkRow->addStretch();
+    aboutLayout->addLayout(linkRow);
+
+    auto* line = new QFrame(aboutPage);
+    line->setFrameShape(QFrame::HLine);
+    line->setFrameShadow(QFrame::Plain);
+    aboutLayout->addSpacing(8);
+    aboutLayout->addWidget(line);
+    aboutLayout->addSpacing(4);
+
+    auto* devBy = new QLabel(tr("Được phát triển bởi"), aboutPage);
+    devBy->setAlignment(Qt::AlignCenter);
+    aboutLayout->addWidget(devBy);
+
+    auto* orgLink = new QLabel(
+        QStringLiteral("<a href=\"%1\">Hyggshi OS Research Technology</a>").arg(kOrgUrl), aboutPage);
+    orgLink->setAlignment(Qt::AlignCenter);
+    orgLink->setTextFormat(Qt::RichText);
+    orgLink->setOpenExternalLinks(true);
+    aboutLayout->addWidget(orgLink);
+
+    auto* configPath = new QLabel(
+        tr("Đường dẫn file cấu hình:\n%1")
+            .arg(QString::fromStdString(nexkey::default_config_path().string())),
+        aboutPage);
+    configPath->setAlignment(Qt::AlignCenter);
+    configPath->setWordWrap(true);
+    configPath->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    aboutLayout->addSpacing(10);
+    aboutLayout->addWidget(configPath);
+    aboutLayout->addStretch();
+
+    // ==========================================
+    // SIDEBAR + PAGES
+    // ==========================================
+    m_sidebar = new QListWidget(this);
+    m_sidebar->setObjectName(QStringLiteral("sidebar"));
+    m_sidebar->setIconSize(QSize(30, 30));
+    m_sidebar->setFixedWidth(230);
+    m_sidebar->setFocusPolicy(Qt::NoFocus);
+    m_sidebar->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    m_sidebar->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+
+    m_pages = new QStackedWidget(this);
+
+    struct Entry {
+        QString label;
+        QWidget* page;
+        QIcon icon;
+    };
+    const QStyle* st = style();
+    const std::vector<Entry> entries = {
+        {tr("Kiểu gõ"), inputPage,
+         themed_icon({QStringLiteral("input-keyboard"), QStringLiteral("preferences-desktop-keyboard")},
+                     st, QStyle::SP_FileDialogDetailedView)},
+        {tr("Tính năng"), enginePage,
+         themed_icon({QStringLiteral("preferences-system"), QStringLiteral("applications-system")}, st,
+                     QStyle::SP_ComputerIcon)},
+        {tr("Ứng dụng"), appPage,
+         themed_icon({QStringLiteral("view-app-grid-symbolic"), QStringLiteral("applications-all"),
+                      QStringLiteral("applications-other")},
+                     st, QStyle::SP_DesktopIcon)},
+        {tr("Sao lưu"), backupPage,
+         themed_icon({QStringLiteral("document-save"), QStringLiteral("drive-harddisk")}, st,
+                     QStyle::SP_DialogSaveButton)},
+        {tr("Giao diện"), interfacePage,
+         themed_icon({QStringLiteral("preferences-desktop-theme"),
+                      QStringLiteral("preferences-desktop-color")},
+                     st, QStyle::SP_DesktopIcon)},
+        {tr("Chẩn đoán"), diagPage,
+         themed_icon({QStringLiteral("utilities-system-monitor"), QStringLiteral("system-search"),
+                      QStringLiteral("dialog-warning")},
+                     st, QStyle::SP_FileDialogInfoView)},
+        {tr("Giới thiệu"), aboutPage,
+         themed_icon({QStringLiteral("help-about"), QStringLiteral("dialog-information")}, st,
+                     QStyle::SP_MessageBoxInformation)},
+    };
+    for (const auto& entry : entries) {
+        if (entry.page == diagPage) {
+            m_diagIndex = m_sidebar->count();
+        }
+        auto* item = new QListWidgetItem(entry.icon, entry.label, m_sidebar);
+        item->setSizeHint(QSize(0, 52));
+        m_pages->addWidget(wrap_page(entry.page, m_pages));
+    }
+    connect(m_sidebar, &QListWidget::currentRowChanged, m_pages, &QStackedWidget::setCurrentIndex);
+    connect(m_sidebar, &QListWidget::currentRowChanged, this, [this](int row) {
+        if (row == m_diagIndex) {
+            refreshDiagnostics();
+        }
+    });
+    m_sidebar->setCurrentRow(0);
+
+    // ==========================================
+    // BOTTOM BAR: Cài đặt lại | Huỷ | Áp dụng | OK
+    // ==========================================
+    auto* resetBtn = new QPushButton(
+        themed_icon({QStringLiteral("edit-undo"), QStringLiteral("view-refresh")}, st,
+                    QStyle::SP_BrowserReload),
+        tr("Cài đặt lại"), this);
+    auto* cancelBtn = new QPushButton(
+        themed_icon({QStringLiteral("dialog-cancel"), QStringLiteral("process-stop")}, st,
+                    QStyle::SP_DialogCancelButton),
+        tr("Huỷ"), this);
+    auto* applyBtn = new QPushButton(
+        themed_icon({QStringLiteral("dialog-apply"), QStringLiteral("dialog-ok-apply")}, st,
+                    QStyle::SP_DialogApplyButton),
+        tr("Áp dụng"), this);
+    auto* okBtn = new QPushButton(
+        themed_icon({QStringLiteral("dialog-ok"), QStringLiteral("emblem-ok-symbolic")}, st,
+                    QStyle::SP_DialogOkButton),
+        tr("OK"), this);
+    okBtn->setObjectName(QStringLiteral("okButton"));
+    okBtn->setDefault(true);
+
+    connect(resetBtn, &QPushButton::clicked, this, &SettingsDialog::resetToDefaults);
+    connect(cancelBtn, &QPushButton::clicked, this, &QDialog::reject);
+    connect(applyBtn, &QPushButton::clicked, this, [this] { apply(); });
+    connect(okBtn, &QPushButton::clicked, this, [this] {
+        if (apply()) {
+            accept();
+        }
+    });
+
+    auto* bottom = new QHBoxLayout();
+    bottom->addWidget(resetBtn);
+    bottom->addStretch();
+    bottom->addWidget(cancelBtn);
+    bottom->addWidget(applyBtn);
+    bottom->addWidget(okBtn);
+
+    auto* body = new QHBoxLayout();
+    body->setSpacing(12);
+    body->addWidget(m_sidebar);
+    body->addWidget(m_pages, 1);
 
     auto* layout = new QVBoxLayout(this);
-    layout->addWidget(tabs);
-    layout->addWidget(buttons);
-
-    connect(buttons, &QDialogButtonBox::accepted, this, [this] {
-        apply();
-        accept();
-    });
-    connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
-    connect(buttons->button(QDialogButtonBox::Apply), &QPushButton::clicked, this,
-            [this] { apply(); });
+    layout->setContentsMargins(12, 12, 12, 12);
+    layout->setSpacing(12);
+    layout->addLayout(body, 1);
+    layout->addLayout(bottom);
 
     load(m_settings);
 }
@@ -347,17 +637,65 @@ nexkey::Settings SettingsDialog::settings() const
     return result;
 }
 
-void SettingsDialog::apply()
+bool SettingsDialog::apply()
 {
     m_settings = settings();
     if (!nexkey::save_settings(m_settings)) {
         QMessageBox::warning(this, tr("NexKey"),
                              tr("The configuration file could not be written:\n%1")
                                  .arg(QString::fromStdString(nexkey::default_config_path().string())));
-        return;
+        return false;
     }
     nexkey::gui::apply_autostart(m_settings.start_with_system);
     emit saved(m_settings);
+    return true;
+}
+
+void SettingsDialog::resetToDefaults()
+{
+    const auto answer = QMessageBox::question(
+        this, tr("Cài đặt lại"),
+        tr("Đưa toàn bộ tuỳ chọn về mặc định?\nGõ tắt và từ điển cá nhân được giữ nguyên. "
+           "Thay đổi chỉ có hiệu lực sau khi bấm Áp dụng hoặc OK."));
+    if (answer != QMessageBox::Yes) {
+        return;
+    }
+    nexkey::Settings defaults;
+    defaults.enabled = m_settings.enabled;
+    defaults.macros = m_settings.macros;
+    defaults.custom_dictionary = m_settings.custom_dictionary;
+    load(defaults);
+}
+
+void SettingsDialog::refreshDiagnostics()
+{
+    const auto report = nexkey::gui::collect_diagnostics();
+
+    if (report.issues.isEmpty()) {
+        m_diagSummary->setStyleSheet(QStringLiteral("color: #4caf50; font-weight: 600;"));
+        m_diagSummary->setText(tr("✔ Không phát hiện vấn đề."));
+    } else {
+        QString text = tr("⚠ Phát hiện %1 vấn đề:").arg(report.issues.size());
+        for (const auto& issue : report.issues) {
+            text += QStringLiteral("\n• ") + issue;
+        }
+        m_diagSummary->setStyleSheet(QStringLiteral("color: #ffa726; font-weight: 600;"));
+        m_diagSummary->setText(text);
+    }
+
+    // Keep the scroll position and any selection when nothing changed.
+    if (m_diagReport->toPlainText() != report.text) {
+        auto* bar = m_diagReport->verticalScrollBar();
+        const int position = bar->value();
+        m_diagReport->setPlainText(report.text);
+        bar->setValue(position);
+    }
+}
+
+void SettingsDialog::copyDiagnostics()
+{
+    refreshDiagnostics();
+    QGuiApplication::clipboard()->setText(m_diagReport->toPlainText());
 }
 
 void SettingsDialog::addAppRule()
@@ -371,6 +709,7 @@ void SettingsDialog::addAppRule()
 
     QStringList modes = {QStringLiteral("telex"), QStringLiteral("vni"),
                          QStringLiteral("viqr"), QStringLiteral("microsoft"),
+                         QStringLiteral("preedit"), QStringLiteral("direct"),
                          QStringLiteral("off (English)")};
     const QString mode = QInputDialog::getItem(
         this, tr("Chọn chế độ"),

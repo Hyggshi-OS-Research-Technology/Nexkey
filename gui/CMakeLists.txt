@@ -9,6 +9,8 @@ qt_add_executable(nexkey-gui
     Autostart.cpp
     Autostart.hpp
     QtHelpers.hpp
+    Diagnostics.cpp
+    Diagnostics.hpp
     Daemon.cpp
     Daemon.hpp
     SettingsDialog.cpp
