@@ -252,6 +252,10 @@ Version 2.0 is a full rewrite:
 - TCVN3, VIQR and Unicode NFD are supported as output charsets, the incomplete
   VNI Windows table was removed rather than kept half working.
 
+## Contributing
+
+Contributions are warmly welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) (Bản tiếng Việt: [CONTRIBUTING-vi.md](CONTRIBUTING-vi.md)) and our [Code of Conduct](CODE_OF_CONDUCT.md) ([CODE_OF_CONDUCT.vi.md](CODE_OF_CONDUCT.vi.md)) for guidelines on reporting bugs, proposing features, and submitting pull requests.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
