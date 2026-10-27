@@ -6,6 +6,7 @@
 #include "QtHelpers.hpp"
 #include "nexkey/Settings.hpp"
 #include "nexkey/Status.hpp"
+#include "nexkey/Unicode.hpp"
 #include "nexkey/Types.hpp"
 
 #include <QCoreApplication>
@@ -122,7 +123,8 @@ DiagnosticsReport collect_diagnostics()
 
     // --- NexKey itself --------------------------------------------------
     section(QStringLiteral("NexKey"));
-    lines << QStringLiteral("Phiên bản: %1 (build %2)").arg(version, gui_build);
+    lines << QStringLiteral("Phiên bản: %1 (build %2, Unicode: %3)")
+                 .arg(version, gui_build, to_qstring(nexkey::unicode::backend_name()));
     lines << QStringLiteral("GUI đang chạy: %1").arg(QCoreApplication::applicationFilePath());
     lines << QStringLiteral("File cấu hình: %1").arg(QString::fromStdString(default_config_path().string()));
 
@@ -221,9 +223,12 @@ DiagnosticsReport collect_diagnostics()
                               : QStringLiteral("không"));
         lines << QStringLiteral("Lệch gần đây (60 giây): %1").arg(status.recent_mismatches);
         lines << QStringLiteral("Cập nhật: %1").arg(age_text(age));
-        lines << QStringLiteral("Addon: %1 (build %2)")
+        lines << QStringLiteral("Addon: %1 (build %2, Unicode: %3)")
                      .arg(QString::fromStdString(status.addon_version),
-                          QString::fromStdString(status.addon_build));
+                          QString::fromStdString(status.addon_build),
+                          status.unicode_backend.empty()
+                              ? QStringLiteral("không rõ")
+                              : QString::fromStdString(status.unicode_backend));
         if (!status.last_learned.empty()) {
             lines << QStringLiteral("Tự chuyển sang preedit gần nhất: %1 (%2)")
                          .arg(QString::fromStdString(status.last_learned),

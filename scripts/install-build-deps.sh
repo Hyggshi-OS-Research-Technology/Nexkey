@@ -40,23 +40,23 @@ if command -v apt-get >/dev/null 2>&1; then
     packages=(
         build-essential cmake ninja-build pkg-config
         qt6-base-dev qt6-base-dev-tools
-        libfcitx5core-dev libibus-1.0-dev
+        libfcitx5core-dev libibus-1.0-dev libicu-dev
     )
     run sudo apt-get update
     run sudo apt-get install -y "${packages[@]}"
 elif command -v dnf >/dev/null 2>&1; then
     packages=(
         gcc-c++ cmake ninja-build pkgconf-pkg-config
-        qt6-qtbase-devel fcitx5-devel ibus-devel
+        qt6-qtbase-devel fcitx5-devel ibus-devel libicu-devel
     )
     run sudo dnf install -y "${packages[@]}"
 elif command -v pacman >/dev/null 2>&1; then
-    packages=(base-devel cmake ninja pkgconf qt6-base fcitx5 ibus)
+    packages=(base-devel cmake ninja pkgconf qt6-base fcitx5 ibus icu)
     run sudo pacman -S --needed "${packages[@]}"
 elif command -v zypper >/dev/null 2>&1; then
     packages=(
         gcc-c++ cmake ninja pkg-config
-        qt6-base-devel fcitx5-devel ibus-devel
+        qt6-base-devel fcitx5-devel ibus-devel libicu-devel
     )
     run sudo zypper install -y "${packages[@]}"
 else

@@ -78,6 +78,7 @@ bool write_status(const RuntimeStatus& status, const std::filesystem::path& path
              << "recent_mismatches=" << status.recent_mismatches << '\n'
              << "addon_version=" << one_line(status.addon_version) << '\n'
              << "addon_build=" << one_line(status.addon_build) << '\n'
+             << "unicode_backend=" << one_line(status.unicode_backend) << '\n'
              << "updated=" << status.updated << '\n'
              << "last_learned=" << one_line(status.last_learned) << '\n'
              << "last_learned_at=" << status.last_learned_at << '\n';
@@ -124,6 +125,8 @@ bool read_status(const std::filesystem::path& path, RuntimeStatus& out)
             result.recent_mismatches = static_cast<int>(parse_int(value));
         } else if (key == "addon_version") {
             result.addon_version = value;
+        } else if (key == "unicode_backend") {
+            result.unicode_backend = value;
         } else if (key == "addon_build") {
             result.addon_build = value;
         } else if (key == "updated") {

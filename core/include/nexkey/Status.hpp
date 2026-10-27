@@ -27,6 +27,8 @@ struct RuntimeStatus {
     /// Version and build id of the code that wrote the status.
     std::string addon_version;
     std::string addon_build;
+    /// Unicode backend of the core library, "icu 72.1" or "builtin".
+    std::string unicode_backend;
     /// Unix time of this snapshot.
     std::int64_t updated{0};
     /// Program that was switched to preedit automatically, and when.

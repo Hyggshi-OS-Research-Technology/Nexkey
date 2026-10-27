@@ -4,6 +4,7 @@
 #include "Cli.hpp"
 
 #include "nexkey/Types.hpp"
+#include "nexkey/Unicode.hpp"
 
 #include <algorithm>
 #include <ostream>
@@ -14,7 +15,8 @@ void print_version(std::ostream& out)
 {
     out << kProgramName << ' ' << kVersion << "\n"
         << "Vietnamese input method for Linux.\n"
-        << "MIT licensed. Built with C++23.\n";
+        << "MIT licensed. Built with C++23.\n"
+        << "Unicode backend: " << unicode::backend_name() << '\n';
 }
 
 void print_methods(std::ostream& out)

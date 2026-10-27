@@ -196,23 +196,52 @@ TEST(normalize_composes_mixed_input)
               std::string("\u1EAF"));
     EXPECT_EQ(nexkey::Converter::normalize("a\u0306\u0301", nexkey::Normalization::Nfc),
               std::string("\u1EAF"));
-    // The marks may arrive in any order; the result is canonical.
-    EXPECT_EQ(nexkey::Converter::normalize("a\u0301\u0302", nexkey::Normalization::Nfc),
-              std::string("\u1EA5"));
     EXPECT_EQ(nexkey::Converter::normalize("o\u0302\u0323", nexkey::Normalization::Nfd),
               std::string("o\u0323\u0302"));
+
+    // Marks that arrive in the "wrong" order are put in canonical order first.
+    // Acute and circumflex have the same combining class, so their order is
+    // kept: NFC gives the precomposed a with an acute plus a combining
+    // circumflex, because no single code point spells that pair. The built-in
+    // fallback is more helpful than the standard and composes the Vietnamese
+    // letter instead; both results are valid, they are just not the same text.
+    const auto reordered = nexkey::Converter::normalize("a\u0301\u0302", nexkey::Normalization::Nfc);
+    EXPECT_TRUE(nexkey::unicode::is_valid(reordered));
+    if (nexkey::unicode::has_full_unicode()) {
+        EXPECT_EQ(reordered, std::string("\u00E1\u0302"));
+    } else {
+        EXPECT_EQ(reordered, std::string("\u1EA5"));
+    }
+
+    // Whatever the input, normalizing twice changes nothing.
+    for (const std::string_view sample : {"a\u0301\u0302", "\u1EC7", "o\u0323\u0302", "abc"}) {
+        for (const auto form : {nexkey::Normalization::Nfc, nexkey::Normalization::Nfd}) {
+            const auto once = nexkey::Converter::normalize(sample, form);
+            EXPECT_EQ(nexkey::Converter::normalize(once, form), once);
+        }
+    }
 }
 
-TEST(normalize_leaves_other_text_alone)
+TEST(normalize_outside_the_vietnamese_alphabet)
 {
-    // Letters outside the Vietnamese alphabet keep the form they came in, and
-    // the text around them is not touched.
-    EXPECT_EQ(nexkey::Converter::normalize("na\u00EFve", nexkey::Normalization::Nfd),
-              std::string("na\u00EFve"));
+    // Text that has no decomposition is not touched, whatever the backend.
     EXPECT_EQ(nexkey::Converter::normalize("\u65E5\u672C\u8A9E", nexkey::Normalization::Nfc),
               std::string("\u65E5\u672C\u8A9E"));
     EXPECT_EQ(nexkey::Converter::normalize("\xF0\x9F\x98\x80 ok", nexkey::Normalization::Nfd),
               std::string("\xF0\x9F\x98\x80 ok"));
+    EXPECT_EQ(nexkey::Converter::normalize("NexKey 2.0", nexkey::Normalization::Nfd),
+              std::string("NexKey 2.0"));
+
+    // A letter outside the Vietnamese alphabet is decomposed by ICU and left
+    // alone by the built-in fallback, which only knows the alphabet.
+    const auto foreign = nexkey::Converter::normalize("na\u00EFve", nexkey::Normalization::Nfd);
+    EXPECT_TRUE(nexkey::unicode::is_valid(foreign));
+    if (nexkey::unicode::has_full_unicode()) {
+        EXPECT_EQ(foreign, std::string("nai\u0308ve"));
+    } else {
+        EXPECT_EQ(foreign, std::string("na\u00EFve"));
+    }
+
     // Malformed input is decoded with U+FFFD, so the output stays valid UTF-8.
     const auto repaired = nexkey::Converter::normalize(std::string("\xFF\x41", 2),
                                                        nexkey::Normalization::Nfd);
@@ -231,6 +260,10 @@ TEST(equal_normalized)
     // Different text stays different, including one tone mark.
     EXPECT_FALSE(nexkey::Converter::equal_normalized(nfc, "Ti\u1EBFng Vi\u1EC7n"));
     EXPECT_FALSE(nexkey::Converter::equal_normalized("ti\u1EBFng", "ti\u1EC7ng"));
-    EXPECT_FALSE(nexkey::Converter::equal_normalized("na\u00EFve", "nai\u0308ve"));
     EXPECT_FALSE(nexkey::Converter::equal_normalized(nfc, ""));
+
+    // Both spellings count outside the Vietnamese alphabet too, but only when
+    // the Unicode database is available.
+    EXPECT_EQ(nexkey::Converter::equal_normalized("na\u00EFve", "nai\u0308ve"),
+              nexkey::unicode::has_full_unicode());
 }

@@ -134,81 +134,19 @@ public:
     std::vector<std::chrono::steady_clock::time_point> mismatches;
 };
 
+/// The text helpers live in the core library so that the direct typing path and
+/// the engine agree on what a character is. The local versions counted a byte
+/// that is not a continuation byte as a character, which splits an overlong or
+/// truncated sequence into pieces and lets a deletion land inside a letter.
 inline std::size_t utf8_char_count(std::string_view text) noexcept
 {
-    std::size_t count = 0;
-    for (const char ch : text) {
-        if ((static_cast<unsigned char>(ch) & 0xC0) != 0x80) {
-            ++count;
-        }
-    }
-    return count;
+    return nexkey::unicode::count_code_points(text);
 }
 
-struct CommonPrefix {
-    std::size_t char_count{0};
-    std::size_t byte_length{0};
-};
-
-inline CommonPrefix utf8_common_prefix(std::string_view a, std::string_view b) noexcept
-{
-    std::size_t i = 0;
-    std::size_t char_count = 0;
-    while (i < a.size() && i < b.size()) {
-        const auto c = static_cast<unsigned char>(a[i]);
-        std::size_t char_len = 1;
-        if ((c & 0x80) == 0) {
-            char_len = 1;
-        } else if ((c & 0xE0) == 0xC0) {
-            char_len = 2;
-        } else if ((c & 0xF0) == 0xE0) {
-            char_len = 3;
-        } else if ((c & 0xF8) == 0xF0) {
-            char_len = 4;
-        } else {
-            break;
-        }
-
-        if (i + char_len > a.size() || i + char_len > b.size()) {
-            break;
-        }
-
-        bool match = true;
-        for (std::size_t k = 0; k < char_len; ++k) {
-            if (a[i + k] != b[i + k]) {
-                match = false;
-                break;
-            }
-        }
-        if (!match) {
-            break;
-        }
-
-        i += char_len;
-        ++char_count;
-    }
-    return {char_count, i};
-}
-
-/// The first `chars` characters of a UTF-8 string.
+/// The first `chars` characters of a UTF-8 string, cut on a character boundary.
 inline std::string utf8_prefix_chars(std::string_view text, std::size_t chars)
 {
-    std::size_t i = 0;
-    std::size_t seen = 0;
-    while (i < text.size() && seen < chars) {
-        const auto c = static_cast<unsigned char>(text[i]);
-        std::size_t len = 1;
-        if ((c & 0xE0) == 0xC0) {
-            len = 2;
-        } else if ((c & 0xF0) == 0xE0) {
-            len = 3;
-        } else if ((c & 0xF8) == 0xF0) {
-            len = 4;
-        }
-        i = std::min(i + len, text.size());
-        ++seen;
-    }
-    return std::string(text.substr(0, i));
+    return std::string(text.substr(0, nexkey::unicode::prefix_length(text, chars)));
 }
 
 void delete_characters(fcitx::InputContext* ic, std::size_t count)
@@ -399,14 +337,14 @@ public:
         }
         if (!step.commit.empty()) {
             if (use_direct_typing(ic)) {
-                const auto prefix = utf8_common_prefix(state.committed_text, step.commit);
+                const auto prefix = nexkey::unicode::common_prefix(state.committed_text, step.commit);
                 const std::size_t old_total_chars = utf8_char_count(state.committed_text);
-                const std::size_t chars_to_delete = old_total_chars - prefix.char_count;
+                const std::size_t chars_to_delete = old_total_chars - prefix.code_points;
                 if (chars_to_delete > 0) {
                     delete_characters(ic, chars_to_delete);
                 }
-                if (prefix.byte_length < step.commit.size()) {
-                    const std::string suffix = step.commit.substr(prefix.byte_length);
+                if (prefix.bytes < step.commit.size()) {
+                    const std::string suffix = step.commit.substr(prefix.bytes);
                     ic->commitString(suffix);
                 }
                 state.committed_text.clear();
@@ -517,9 +455,12 @@ private:
         }
         // Chromium / Electron based programs ignore deleteSurroundingText, so
         // direct typing cannot replace or delete characters there.
+        // Program names are ASCII and the match must not follow the locale.
         std::string lower = program;
         for (char& c : lower) {
-            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            if (c >= 'A' && c <= 'Z') {
+                c = static_cast<char>(c - 'A' + 'a');
+            }
         }
         for (const char* needle : {"chrome", "chromium", "brave", "firefox", "electron",
                                    "code", "discord", "slack", "obsidian"}) {
@@ -629,6 +570,7 @@ private:
         status.recent_mismatches = recent;
         status.addon_version = std::string(nexkey::kVersion);
         status.addon_build = std::string(nexkey::build_id());
+        status.unicode_backend = std::string(nexkey::unicode::backend_name());
         status.updated = static_cast<std::int64_t>(std::time(nullptr));
         status.last_learned = last_learned_;
         status.last_learned_at = last_learned_at_;
@@ -657,16 +599,16 @@ private:
     void commit_candidate(fcitx::InputContext* ic, NexKeyState& state, const std::string& text)
     {
         if (use_direct_typing(ic)) {
-            const auto prefix = utf8_common_prefix(state.committed_text, text);
+            const auto prefix = nexkey::unicode::common_prefix(state.committed_text, text);
             const std::size_t old_total_chars = utf8_char_count(state.committed_text);
-            const std::size_t chars_to_delete = old_total_chars - prefix.char_count;
+            const std::size_t chars_to_delete = old_total_chars - prefix.code_points;
             if (chars_to_delete > 0) {
                 delete_characters(ic, chars_to_delete);
             }
             state.engine.discard();
             state.committed_text.clear();
-            if (prefix.byte_length < text.size()) {
-                const std::string suffix = text.substr(prefix.byte_length);
+            if (prefix.bytes < text.size()) {
+                const std::string suffix = text.substr(prefix.bytes);
                 ic->commitString(suffix);
             }
             update_preedit(ic, state);
@@ -687,14 +629,14 @@ private:
         if (use_direct_typing(ic)) {
             const std::string new_preedit(state.engine.preedit());
             if (new_preedit != state.committed_text) {
-                const auto prefix = utf8_common_prefix(state.committed_text, new_preedit);
+                const auto prefix = nexkey::unicode::common_prefix(state.committed_text, new_preedit);
                 const std::size_t old_total_chars = utf8_char_count(state.committed_text);
-                const std::size_t chars_to_delete = old_total_chars - prefix.char_count;
+                const std::size_t chars_to_delete = old_total_chars - prefix.code_points;
                 if (chars_to_delete > 0) {
                     delete_characters(ic, chars_to_delete);
                 }
-                if (prefix.byte_length < new_preedit.size()) {
-                    const std::string suffix = new_preedit.substr(prefix.byte_length);
+                if (prefix.bytes < new_preedit.size()) {
+                    const std::string suffix = new_preedit.substr(prefix.bytes);
                     ic->commitString(suffix);
                 }
                 state.committed_text = new_preedit;

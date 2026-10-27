@@ -65,7 +65,7 @@ that were enabled at configure time:
 Depends: libc6, libstdc++6,
          libqt6core6t64 | libqt6core6, libqt6gui6t64 | libqt6gui6,
          libqt6widgets6t64 | libqt6widgets6, libqt6dbus6t64 | libqt6dbus6,
-         libfcitx5core7 | libfcitx5core0, libibus-1.0-5
+         libfcitx5core7 | libfcitx5core0, libibus-1.0-5, libicu72
 Recommends: fcitx5, fcitx5-frontend-gtk3 | fcitx5-frontend-gtk4 |
             fcitx5-frontend-qt5 | fcitx5-frontend-qt6
 Suggests: fcitx5-config-qt
@@ -76,6 +76,11 @@ The alternatives are not a mistake. The 64 bit time_t transition renamed
 and Fcitx5 replaced `libfcitx5core0` with `libfcitx5core7` in 5.1. A package
 that names only one spelling cannot be installed on the other half of the
 distributions, which is what `|` solves here.
+
+ICU has no `|` alternative because its soname carries the major version and a
+binary only loads the soname it was linked against: a package built against ICU
+72 needs `libicu72`. Building on the release you intend to support, or with
+`-DNEXKEY_USE_ICU=OFF` on a system without ICU, is the way to change that.
 
 `Recommends` is where the input method daemons and the toolkit frontends live:
 the backends are useless without Fcitx5 or IBus, but a user who only wants the
@@ -230,7 +235,7 @@ the AppImage and a distribution package share the same settings.
 
 The `full` job also checks the produced package: the tray binary, the Fcitx5
 addon, the IBus engine, the component file, the desktop file and the autostart
-template must be inside, `Depends` must mention the Qt6, Fcitx5 and IBus
+template must be inside, `Depends` must mention the Qt6, Fcitx5, IBus and ICU
 libraries, the component XML must parse and name the right engine path, the
 extracted CLI must run, and the IBus engine must exit cleanly with an error when
 no daemon is running.

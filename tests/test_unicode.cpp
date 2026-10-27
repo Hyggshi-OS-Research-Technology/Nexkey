@@ -502,3 +502,101 @@ TEST(grapheme_d_stroke)
     EXPECT_TRUE(decomposed->letter.upper);
     EXPECT_EQ(decomposed->letter.mark, nexkey::Mark::Stroke);
 }
+
+// ---------------------------------------------------------------------------
+// The Unicode backend: ICU, or the Vietnamese fallback
+// ---------------------------------------------------------------------------
+
+TEST(unicode_backend_is_reported)
+{
+    const auto name = nexkey::unicode::backend_name();
+    EXPECT_FALSE(name.empty());
+    // "icu 72.1" when ICU is there, "builtin" otherwise; the flag has to agree.
+    EXPECT_EQ(nexkey::unicode::has_full_unicode(), name.substr(0, 3) == "icu");
+}
+
+TEST(unicode_normalization_covers_every_script)
+{
+    using nexkey::unicode::Normalization;
+    using nexkey::unicode::normalize;
+
+    // Text that has no decomposition is never changed.
+    EXPECT_EQ(normalize("\u65E5\u672C\u8A9E", Normalization::Nfd), std::string("\u65E5\u672C\u8A9E"));
+    EXPECT_EQ(normalize("NexKey 2.0", Normalization::Nfd), std::string("NexKey 2.0"));
+    EXPECT_EQ(normalize("", Normalization::Nfc), std::string());
+
+    // Greek alpha with tonos and the Hangul syllable han: the decomposition of
+    // the first is one letter plus a mark, the second becomes three jamo.
+    const auto greek = normalize("\u03AC", Normalization::Nfd);
+    const auto hangul = normalize("\uD55C", Normalization::Nfd);
+    if (nexkey::unicode::has_full_unicode()) {
+        EXPECT_EQ(greek, std::string("\u03B1\u0301"));
+        EXPECT_EQ(hangul, std::string("\u1112\u1161\u11AB"));
+        EXPECT_EQ(normalize(hangul, Normalization::Nfc), std::string("\uD55C"));
+    } else {
+        // The fallback only knows the Vietnamese alphabet and copies the rest.
+        EXPECT_EQ(greek, std::string("\u03AC"));
+        EXPECT_EQ(hangul, std::string("\uD55C"));
+    }
+    EXPECT_TRUE(nexkey::unicode::is_valid(greek));
+    EXPECT_TRUE(nexkey::unicode::is_valid(hangul));
+}
+
+TEST(unicode_grapheme_clusters_follow_the_backend)
+{
+    // A family joined by U+200D, the Vietnamese flag and a thumbs up with a
+    // skin tone. The emoji rules need the Unicode data; the fallback only knows
+    // base characters and combining marks.
+    const std::string family =
+        "\xF0\x9F\x91\xA8\xE2\x80\x8D\xF0\x9F\x91\xA9\xE2\x80\x8D\xF0\x9F\x91\xA7";
+    const std::string flag = "\xF0\x9F\x87\xBB\xF0\x9F\x87\xB3";
+    const std::string thumb = "\xF0\x9F\x91\x8D\xF0\x9F\x8F\xBD";
+
+    EXPECT_EQ(nexkey::unicode::count_graphemes(thumb), std::size_t{1});
+    EXPECT_EQ(nexkey::unicode::count_graphemes("Vi\u1EC7t"), std::size_t{4});
+    EXPECT_EQ(nexkey::unicode::count_graphemes("e\u0302\u0301"), std::size_t{1});
+
+    if (nexkey::unicode::has_full_unicode()) {
+        EXPECT_EQ(nexkey::unicode::count_graphemes(family), std::size_t{1});
+        EXPECT_EQ(nexkey::unicode::count_graphemes(flag), std::size_t{1});
+        EXPECT_EQ(nexkey::unicode::count_graphemes(family + "x"), std::size_t{2});
+        // Deleting one cluster removes the whole family, not just the last emoji.
+        EXPECT_EQ(nexkey::unicode::grapheme_boundary(family, 1), std::size_t{0});
+        EXPECT_EQ(nexkey::unicode::grapheme_boundary(family + "x", 1), std::size_t{family.size()});
+    } else {
+        // Without the Unicode data a zero width joiner is a character of its
+        // own, so the family counts as five and the flag as two. This is why
+        // the frontends only use this helper to delete text when the build has
+        // ICU; otherwise they fall back to code point counts.
+        EXPECT_EQ(nexkey::unicode::count_graphemes(family), std::size_t{5});
+        EXPECT_EQ(nexkey::unicode::count_graphemes(flag), std::size_t{2});
+    }
+}
+
+TEST(unicode_case_mapping)
+{
+    using nexkey::unicode::upper;
+    using nexkey::unicode::upper_first;
+
+    EXPECT_EQ(upper(""), std::string());
+    EXPECT_EQ(upper("NexKey 2.0"), std::string("NEXKEY 2.0"));
+    EXPECT_EQ(upper_first(""), std::string());
+    EXPECT_EQ(upper_first("nexkey"), std::string("Nexkey"));
+    EXPECT_EQ(upper_first("NexKey"), std::string("NexKey"));
+    EXPECT_EQ(upper_first("1abc"), std::string("1abc"));
+
+    // The bytes of a Vietnamese letter are not ASCII, so a byte wise toupper()
+    // turns "việt nam" into "VIệT NAM"; the Unicode backend gets it right.
+    const auto vietnamese = upper("vi\u1EC7t nam");
+    EXPECT_TRUE(nexkey::unicode::is_valid(vietnamese));
+    if (nexkey::unicode::has_full_unicode()) {
+        EXPECT_EQ(vietnamese, std::string("VI\u1EC6T NAM"));
+        EXPECT_EQ(upper("\u0111\u01B0\u1EDDng"), std::string("\u0110\u01AF\u1EDC" "NG"));
+        EXPECT_EQ(upper_first("\u0111\u01B0\u1EDDng"), std::string("\u0110\u01B0\u1EDDng"));
+        // Full case mapping, which a per code point table cannot express.
+        EXPECT_EQ(upper("stra\u00DFe"), std::string("STRASSE"));
+    } else {
+        EXPECT_EQ(vietnamese, std::string("VI\u1EC7T NAM"));
+        EXPECT_EQ(upper_first("\u0111\u01B0\u1EDDng"), std::string("\u0111\u01B0\u1EDDng"));
+    }
+}

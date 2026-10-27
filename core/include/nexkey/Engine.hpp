@@ -92,6 +92,10 @@ public:
 private:
     void recompute();
     void reset_state();
+    /// Macro lookup for the shorthand typed so far: exact match first, then the
+    /// same text with ASCII letters lower cased. Returns nullptr when the
+    /// shorthand is not a macro.
+    [[nodiscard]] const std::string* find_macro(std::string_view raw) const;
 
     Options m_options;
     std::unordered_map<std::string, std::string> m_macros;

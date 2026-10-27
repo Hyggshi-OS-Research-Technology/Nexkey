@@ -27,10 +27,15 @@ std::string_view trim(std::string_view value)
 
 std::string to_lower(std::string_view value)
 {
+    // Configuration keys and the values they are compared with are ASCII, and
+    // the comparison must not follow the user's locale: std::tolower('I') is a
+    // dotted i under tr_TR.UTF-8, so "INPUT" would stop matching "input".
     std::string out(value);
-    std::ranges::transform(out, out.begin(), [](unsigned char character) {
-        return static_cast<char>(std::tolower(character));
-    });
+    for (char& character : out) {
+        if (character >= 'A' && character <= 'Z') {
+            character = static_cast<char>(character - 'A' + 'a');
+        }
+    }
     return out;
 }
 

@@ -17,6 +17,31 @@ set_target_properties(nexkey-core PROPERTIES
     POSITION_INDEPENDENT_CODE ON
 )
 
+# Unicode normalization, grapheme segmentation and case mapping need the Unicode
+# character database, which is far too large to maintain by hand. ICU provides
+# it; without ICU a compact implementation that knows the Vietnamese alphabet is
+# compiled in, so a plain build still works and only loses coverage outside that
+# alphabet.
+if(NEXKEY_USE_ICU)
+    find_package(ICU 67 QUIET COMPONENTS uc i18n)
+    if(ICU_FOUND)
+        target_link_libraries(nexkey-core PRIVATE ICU::uc ICU::i18n)
+        target_compile_definitions(nexkey-core PRIVATE NEXKEY_HAVE_ICU=1)
+        message(STATUS
+            "NexKey: ICU ${ICU_VERSION} provides normalization, grapheme segmentation "
+            "and Unicode case mapping")
+        set(NEXKEY_UNICODE_BACKEND "icu ${ICU_VERSION}" PARENT_SCOPE)
+    else()
+        message(STATUS
+            "NexKey: ICU not found, Unicode support covers the Vietnamese alphabet only "
+            "(install libicu-dev for full coverage)")
+        set(NEXKEY_UNICODE_BACKEND "builtin" PARENT_SCOPE)
+    endif()
+else()
+    message(STATUS "NexKey: NEXKEY_USE_ICU=OFF, Unicode support covers the Vietnamese alphabet only")
+    set(NEXKEY_UNICODE_BACKEND "builtin" PARENT_SCOPE)
+endif()
+
 target_include_directories(nexkey-core
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>

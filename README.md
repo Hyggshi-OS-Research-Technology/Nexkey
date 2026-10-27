@@ -65,7 +65,7 @@ Right-click the NexKey system tray icon to access quick settings:
 | --- | --- |
 | Compiler | GCC 12+, Clang 15+ (C++23) |
 | Build system | CMake 3.21+ |
-| Core and CLI | none |
+| Core and CLI | optional: ICU 67+ (`libicu-dev`) |
 | Tray application | Qt 6.2+ (Core, Gui, Widgets, DBus) |
 | Fcitx5 addon | Fcitx5 5.0+ development files |
 | IBus engine | IBus 1.5+ development files |
@@ -74,10 +74,16 @@ Right-click the NexKey system tray icon to access quick settings:
 Every optional component is detected at configure time. A plain build with no
 Qt and no Fcitx5 still produces the library, the CLI and the test suite.
 
+ICU is the recommended dependency of the core library: it supplies Unicode
+normalization (NFC/NFD), grapheme cluster segmentation and case mapping. Without
+it NexKey still builds, but Unicode support is limited to the Vietnamese
+alphabet plus combining marks, which is enough for Vietnamese text and not much
+else. `nexkey version` prints the backend that was compiled in.
+
 ## Build
 
 ```bash
-./scripts/install-build-deps.sh  # Qt6, Fcitx5 and IBus development files
+./scripts/install-build-deps.sh  # ICU, Qt6, Fcitx5 and IBus development files
 ./scripts/build.sh               # Debug build in ./build
 ./scripts/test.sh                # build and run the test suite
 ./scripts/package-deb.sh         # CPack Debian package  -> build-deb/*.deb
@@ -102,6 +108,7 @@ Useful CMake options:
 | `NEXKEY_BUILD_FCITX5` | `ON` | Build the Fcitx5 addon when Fcitx5 is found |
 | `NEXKEY_BUILD_IBUS` | `ON` | Build the IBus engine when IBus is found |
 | `NEXKEY_WARNINGS_AS_ERRORS` | `OFF` | Turn compiler warnings into errors |
+| `NEXKEY_USE_ICU` | `ON` | Link ICU for Unicode normalization, grapheme segmentation and case mapping when it is found |
 | `NEXKEY_INSTALL_DOCS` | `ON` | Install the documentation |
 | `NEXKEY_INSTALL_AUTOSTART` | `ON` | Ship the system wide autostart template |
 | `NEXKEY_PACKAGING_SHLIBDEPS` | `OFF` | Let `dpkg-shlibdeps` name the dependencies for this release only, instead of the portable list |
@@ -109,7 +116,7 @@ Useful CMake options:
 ## Install and use
 
 ```bash
-sudo apt install build-essential cmake ninja-build pkg-config \
+sudo apt install build-essential cmake ninja-build pkg-config libicu-dev \
      qt6-base-dev libfcitx5core-dev libibus-1.0-dev   # build dependencies
 ./scripts/package-deb.sh                              # -> build-deb/*.deb
 sudo apt install ./build-deb/nexkey_*.deb

@@ -17,6 +17,10 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
+      - name: Install ICU
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libicu-dev
       - name: Configure
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
              -DNEXKEY_BUILD_GUI=OFF -DNEXKEY_BUILD_FCITX5=OFF
@@ -25,6 +29,12 @@ jobs:
         run: cmake --build build --parallel
       - name: Test
         run: ctest --test-dir build --output-on-failure
+      - name: Check the Unicode backend
+        run: |
+          # The job installs ICU, so a build that silently fell back to the
+          # built-in tables would mean the dependency probe is broken.
+          ./build/cli/nexkey version | grep -q 'Unicode backend: icu' \
+            || { echo "::error::ICU was installed but not used"; exit 1; }
 
   full:
     name: Qt6 tray, Fcitx5 addon and Debian package
@@ -35,13 +45,13 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build pkg-config dpkg-dev file \
-            ${QT_PACKAGES} libfcitx5core-dev libibus-1.0-dev
+            ${QT_PACKAGES} libfcitx5core-dev libibus-1.0-dev libicu-dev
       - name: Configure
         run: |
           set -o pipefail
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DNEXKEY_WARNINGS_AS_ERRORS=ON 2>&1 | tee configure.log
-          if grep -Eq "(Qt6|Fcitx5Core|IBus).*not found" configure.log; then
-            echo "::error::a component was skipped: $(grep -E '(Qt6|Fcitx5Core|IBus).*not found' configure.log | head -1)"
+          if grep -Eq "(Qt6|Fcitx5Core|IBus).*not found|ICU not found" configure.log; then
+            echo "::error::a component was skipped: $(grep -E '(Qt6|Fcitx5Core|IBus).*not found|ICU not found' configure.log | head -1)"
             exit 1
           fi
       - name: Build
@@ -55,6 +65,12 @@ jobs:
           fi
       - name: Test
         run: ctest --test-dir build --output-on-failure
+      - name: Check the Unicode backend
+        run: |
+          # The job installs ICU, so a build that silently fell back to the
+          # built-in tables would mean the dependency probe is broken.
+          ./build/cli/nexkey version | grep -q 'Unicode backend: icu' \
+            || { echo "::error::ICU was installed but not used"; exit 1; }
       - name: Check the input method backends
         run: |
           set -e
@@ -129,6 +145,8 @@ jobs:
             || { echo "::error::the Fcitx5 runtime dependency is missing"; exit 1; }
           printf '%s' "$depends" | grep -Eq 'libibus-1\.0-5' \
             || { echo "::error::the IBus runtime dependency is missing"; exit 1; }
+          printf '%s' "$depends" | grep -Eq 'libicu[0-9]+' \
+            || { echo "::error::the ICU runtime dependency is missing"; exit 1; }
 
           # The 64 bit time_t transition renamed these libraries, so a package
           # that names only one spelling is uninstallable on half of the
@@ -231,7 +249,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build ${QT_PACKAGES} libfcitx5core-dev libibus-1.0-dev
+          sudo apt-get install -y cmake ninja-build ${QT_PACKAGES} libfcitx5core-dev libibus-1.0-dev libicu-dev
       - name: Build the AppImage
         run: ./scripts/package-appimage.sh --output-dir dist
       - name: Verify the image contents

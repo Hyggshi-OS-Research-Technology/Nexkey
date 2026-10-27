@@ -87,6 +87,11 @@ endif()
 if(IBus_FOUND)
     string(APPEND _nexkey_depends ", libibus-1.0-5")
 endif()
+# ICU keeps its soname per major version, so a package that links ICU needs the
+# package of the ICU it was built against; there is no portable alternative.
+if(NEXKEY_UNICODE_BACKEND MATCHES "^icu ([0-9]+)")
+    string(APPEND _nexkey_depends ", libicu${CMAKE_MATCH_1}")
+endif()
 
 find_program(NEXKEY_FILE_TOOL NAMES file)
 find_program(NEXKEY_DPKG_SHLIBDEPS NAMES dpkg-shlibdeps)

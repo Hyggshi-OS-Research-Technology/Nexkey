@@ -56,8 +56,31 @@ delete and the part it commits, and it never lands inside a code point.
 combining marks with it instead of leaving a floating accent behind.
 
 A cluster is a base code point plus the combining marks, variation selectors
-and emoji modifiers that follow it. The rules that need full Unicode tables
-(CR LF, the emoji ZWJ sequences) are treated as separate characters.
+and emoji modifiers that follow it.
+
+### Unicode backend
+
+Everything that needs the Unicode character database (normalization, grapheme
+clusters and case mapping) goes through one seam in `core/src/Unicode.cpp`:
+
+| Backend | Selected by | Coverage |
+| --- | --- | --- |
+| ICU | `NEXKEY_USE_ICU=ON` and ICU 67+ found at configure time | every script, UAX #15 and UAX #29 as published |
+| built-in | otherwise | the Vietnamese alphabet and the combining marks it uses |
+
+The built-in backend exists so that build dependencies stay optional: it knows
+the Vietnamese letters and marks by table and treats anything else as a base
+character, which is correct for Vietnamese text and wrong for, say, emoji ZWJ
+sequences or Hangul. `nexkey::unicode::has_full_unicode()` reports which one is
+running, `backend_name()` returns `"icu 72.1"` or `"builtin"`, and both the CLI
+(`nexkey version`) and the tray diagnostics print it, so a bug report says which
+code path produced the text.
+
+Case mapping is deliberately done in the root locale: `upper("vi\u1EC7t nam")`
+gives `VI\u1EC6T NAM` and `upper("i")` gives `I` rather than the Turkish dotted
+capital I. The user's locale is about the document, not about the shape of a
+macro expansion, and a Turkish locale must not change how a Vietnamese macro is
+capitalized.
 
 ### From keystrokes to text
 
@@ -174,7 +197,9 @@ standard on a few thousand malformed byte strings.
   comes before its circumflex. `Converter::normalize` rewrites a string in
   either form and `Converter::equal_normalized` compares two strings that may
   use different forms, which is what a frontend needs when it compares the
-  document with what it wrote.
+  document with what it wrote. Both delegate to the Unicode backend, so a build
+  with ICU normalizes every script and a build without it normalizes the
+  Vietnamese alphabet.
 - **TCVN3** is a single byte legacy charset from the DOS era. Vietnamese
   letters live in the `0xA1` to `0xFE` range and the case of an accented letter
   is not stored.

@@ -13,6 +13,14 @@
 // primitives the commit path needs: a character set such as Unicode NFD stores
 // one Vietnamese letter as up to three code points, so "delete one character"
 // has to be counted in clusters, not in bytes and not in code points.
+//
+// Normalization, grapheme segmentation and case mapping are the parts that are
+// too large to hand maintain: they need the Unicode character database. When
+// the library is built with ICU (NEXKEY_USE_ICU, the default) those three come
+// from ICU and cover every script. Without ICU a small implementation that
+// knows the Vietnamese alphabet is compiled in, and everything outside that
+// alphabet is copied through unchanged. has_full_unicode() reports which one is
+// in use, and backend_name() is what --version prints.
 
 #pragma once
 
@@ -31,6 +39,18 @@ inline constexpr char32_t kReplacementCharacter = U'\uFFFD';
 {
     return code_point <= 0x10FFFF && (code_point < 0xD800 || code_point > 0xDFFF);
 }
+
+/// Unicode normalization form.
+///
+/// The same Vietnamese letter has two valid spellings: one precomposed code
+/// point (NFC: U+1EAF is a with a breve and an acute) or a base letter followed
+/// by combining marks in canonical order (NFD: "a" + U+0306 + U+0301).
+/// Applications and keyboard layouts disagree about which one they use, so the
+/// frontends compare text after normalizing it, never by raw bytes.
+enum class Normalization : std::uint8_t {
+    Nfc, ///< One precomposed code point per letter, what most applications use.
+    Nfd, ///< Base letter plus combining marks in canonical order.
+};
 
 /// Decode UTF-8.
 ///
@@ -80,10 +100,9 @@ void append(std::string& out, char32_t code_point);
 /// True for the code points that attach to the character in front of them:
 /// combining marks, variation selectors and emoji modifiers.
 ///
-/// This is the subset of the Unicode grapheme cluster rules NexKey needs.
-/// Sequences that need full tables (CR LF, the emoji ZWJ rules) are treated as
-/// separate characters, which is why the helpers below talk about clusters and
-/// not about "extended grapheme clusters".
+/// This is the subset of the Unicode grapheme cluster rules the built-in
+/// segmenter needs. With ICU the full extended grapheme cluster rules apply, so
+/// `is_extending` only describes what the fallback can see.
 [[nodiscard]] constexpr bool is_extending(char32_t code_point) noexcept
 {
     return (code_point >= 0x0300 && code_point <= 0x036F) ||   // combining diacritics
@@ -105,9 +124,30 @@ void append(std::string& out, char32_t code_point);
 /// the string. The result is always a code point boundary.
 [[nodiscard]] std::size_t prefix_length(std::string_view text, std::size_t count) noexcept;
 
+/// True when the library was built against ICU.
+///
+/// Then normalization, grapheme segmentation and case mapping cover all of
+/// Unicode. Otherwise only the Vietnamese alphabet is handled and text outside
+/// it is copied through unchanged.
+[[nodiscard]] bool has_full_unicode() noexcept;
+
+/// Name of the Unicode backend, "icu 72.1" or "builtin". Shown by `--version`
+/// and written to the diagnostics status so that a report always says which one
+/// was running.
+[[nodiscard]] std::string_view backend_name() noexcept;
+
+/// Rewrite a UTF-8 string in the given normalization form.
+///
+/// The output is always well formed UTF-8. Malformed input is decoded the way
+/// decode() decodes it, so it can only turn into U+FFFD, never into bytes that
+/// a strict decoder would reject again.
+[[nodiscard]] std::string normalize(std::string_view text, Normalization form);
+
 /// Number of grapheme clusters in `text`, i.e. the number of characters a user
-/// sees: `e` plus U+0302 plus U+0301 is one cluster, exactly like U+1EBF.
-[[nodiscard]] std::size_t count_graphemes(std::string_view text) noexcept;
+/// sees: `e` plus U+0302 plus U+0301 is one cluster, exactly like U+1EBF, and
+/// with ICU an emoji sequence such as a family joined by zero width joiners is
+/// one cluster as well.
+[[nodiscard]] std::size_t count_graphemes(std::string_view text);
 
 /// How much two strings share at their start.
 ///
@@ -130,6 +170,13 @@ struct Prefix {
 /// `text.size()`, `grapheme_boundary(text, n)` for `n >= count_graphemes(text)`
 /// is zero, so `text.substr(grapheme_boundary(text, n))` is the last `n`
 /// characters of the string.
-[[nodiscard]] std::size_t grapheme_boundary(std::string_view text, std::size_t clusters) noexcept;
+[[nodiscard]] std::size_t grapheme_boundary(std::string_view text, std::size_t clusters);
+
+/// Uppercase a UTF-8 string. With ICU this is the full Unicode case mapping
+/// ("vi\u1EC7t nam" becomes "VI\u1EC6T NAM"); without it only ASCII letters change.
+[[nodiscard]] std::string upper(std::string_view text);
+
+/// Uppercase the first code point of a UTF-8 string and leave the rest alone.
+[[nodiscard]] std::string upper_first(std::string_view text);
 
 } // namespace nexkey::unicode

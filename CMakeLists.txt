@@ -28,6 +28,10 @@ option(NEXKEY_BUILD_GUI "Build the Qt6 tray application" ON)
 option(NEXKEY_BUILD_FCITX5 "Build the Fcitx5 input method addon" ON)
 option(NEXKEY_BUILD_IBUS "Build the IBus input method engine" ON)
 option(NEXKEY_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
+option(NEXKEY_USE_ICU
+    "Use ICU for Unicode normalization, grapheme segmentation and case mapping when it is available"
+    ON
+)
 option(NEXKEY_INSTALL_DOCS "Install documentation and license files" ON)
 
 add_subdirectory(core)

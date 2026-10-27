@@ -4,6 +4,7 @@
 #include "TestHarness.hpp"
 
 #include "nexkey/Status.hpp"
+#include "nexkey/Unicode.hpp"
 
 #include <filesystem>
 
@@ -23,6 +24,7 @@ TEST(status_roundtrip)
     status.recent_mismatches = 2;
     status.addon_version = "2.0.0";
     status.addon_build = std::string(nexkey::build_id());
+    status.unicode_backend = std::string(nexkey::unicode::backend_name());
     status.updated = 1730000000;
     status.last_learned = "code";
     status.last_learned_at = 1730000001;
@@ -37,6 +39,7 @@ TEST(status_roundtrip)
     EXPECT_FALSE(loaded.surrounding_valid);
     EXPECT_EQ(loaded.recent_mismatches, 2);
     EXPECT_EQ(loaded.addon_build, status.addon_build);
+    EXPECT_EQ(loaded.unicode_backend, std::string(nexkey::unicode::backend_name()));
     EXPECT_EQ(loaded.updated, static_cast<std::int64_t>(1730000000));
     EXPECT_EQ(loaded.last_learned, std::string("code"));
 

@@ -32,6 +32,27 @@ void Engine::recompute()
     m_preedit = render(m_raw);
 }
 
+const std::string* Engine::find_macro(std::string_view raw) const
+{
+    if (auto it = m_macros.find(std::string(raw)); it != m_macros.end()) {
+        return &it->second;
+    }
+    // Shorthand matching is ASCII, so it must not depend on the locale: under a
+    // Turkish locale std::tolower('I') is a dotted i and "IBUS" would stop
+    // matching "ibus". Lowering the ASCII range by hand is what the
+    // configuration file means.
+    std::string lowered(raw);
+    for (char& c : lowered) {
+        if (c >= 'A' && c <= 'Z') {
+            c = static_cast<char>(c - 'A' + 'a');
+        }
+    }
+    if (auto it = m_macros.find(lowered); it != m_macros.end()) {
+        return &it->second;
+    }
+    return nullptr;
+}
+
 void Engine::reset_state()
 {
     m_raw.clear();
@@ -108,12 +129,13 @@ std::string expand_macro_text(std::string text, std::string_view raw, const Opti
                 break;
             }
         }
+        // Case mapping goes through the Unicode backend: uppercasing the bytes
+        // of a macro only works for ASCII, so a Vietnamese macro would come out
+        // with its accented letters unchanged.
         if (all_upper && raw.size() >= 2) {
-            for (char& c : text) {
-                c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-            }
+            text = unicode::upper(text);
         } else if (std::isupper(static_cast<unsigned char>(raw.front())) && !text.empty()) {
-            text.front() = static_cast<char>(std::toupper(static_cast<unsigned char>(text.front())));
+            text = unicode::upper_first(text);
         }
     }
     return text;
@@ -216,18 +238,10 @@ Step Engine::type(char32_t code_point)
         if (code_point == ':') {
             m_raw.push_back(':');
             Step step;
-            if (auto it = m_macros.find(m_raw); it != m_macros.end()) {
-                step.commit = it->second;
+            if (const std::string* macro = find_macro(m_raw); macro != nullptr) {
+                step.commit = *macro;
             } else {
-                std::string lower_raw = m_raw;
-                for (char& c : lower_raw) {
-                    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-                }
-                if (auto it_low = m_macros.find(lower_raw); it_low != m_macros.end()) {
-                    step.commit = it_low->second;
-                } else {
-                    step.commit = m_raw;
-                }
+                step.commit = m_raw;
             }
             step.handled = true;
             reset_state();
@@ -235,18 +249,10 @@ Step Engine::type(char32_t code_point)
         }
         if (code_point == ' ' || code_point == '\t') {
             Step step;
-            if (auto it = m_macros.find(m_raw); it != m_macros.end()) {
-                step.commit = it->second;
+            if (const std::string* macro = find_macro(m_raw); macro != nullptr) {
+                step.commit = *macro;
             } else {
-                std::string lower_raw = m_raw;
-                for (char& c : lower_raw) {
-                    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-                }
-                if (auto it_low = m_macros.find(lower_raw); it_low != m_macros.end()) {
-                    step.commit = it_low->second;
-                } else {
-                    step.commit = m_raw;
-                }
+                step.commit = m_raw;
             }
             step.commit.push_back(static_cast<char>(code_point));
             step.handled = true;
@@ -288,14 +294,8 @@ Step Engine::type(char32_t code_point)
                 word = expand_macro_text(it->second, m_raw, m_options);
             } else if (auto it_pre = m_macros.find(m_preedit); it_pre != m_macros.end()) {
                 word = expand_macro_text(it_pre->second, m_raw, m_options);
-            } else {
-                std::string lower_raw = m_raw;
-                for (char& c : lower_raw) {
-                    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-                }
-                if (auto it_low = m_macros.find(lower_raw); it_low != m_macros.end()) {
-                    word = expand_macro_text(it_low->second, m_raw, m_options);
-                }
+            } else if (const std::string* macro = find_macro(m_raw); macro != nullptr) {
+                word = expand_macro_text(*macro, m_raw, m_options);
             }
         }
         step.commit = std::move(word);

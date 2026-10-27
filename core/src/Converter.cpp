@@ -271,182 +271,6 @@ std::u32string decode_viqr(std::string_view bytes)
     return out;
 }
 
-// ---------------------------------------------------------------------------
-// Unicode NFD.
-// ---------------------------------------------------------------------------
-
-constexpr char32_t kCombiningCircumflex = U'\u0302';
-constexpr char32_t kCombiningBreve = U'\u0306';
-constexpr char32_t kCombiningHorn = U'\u031B';
-constexpr char32_t kCombiningAcute = U'\u0301';
-constexpr char32_t kCombiningGrave = U'\u0300';
-constexpr char32_t kCombiningHook = U'\u0309';
-constexpr char32_t kCombiningTilde = U'\u0303';
-constexpr char32_t kCombiningDot = U'\u0323';
-
-constexpr std::optional<char32_t> combining_mark(Mark mark) noexcept
-{
-    switch (mark) {
-    case Mark::Circumflex:
-        return kCombiningCircumflex;
-    case Mark::Breve:
-        return kCombiningBreve;
-    case Mark::Horn:
-        return kCombiningHorn;
-    default:
-        return std::nullopt;
-    }
-}
-
-/// Canonical combining class of the marks above (Unicode character database).
-///
-/// UAX #15 sorts the marks of a decomposition by this number, and the canonical
-/// decompositions of the Vietnamese letters depend on it: the horn (216) comes
-/// before the dot below (220), which comes before every accent that sits above
-/// the letter (230). Writing the dot of "o with a circumflex and a dot below"
-/// after the circumflex produces a string that looks right but is not NFD, and
-/// a client that normalises its document would then disagree with NexKey about
-/// the text.
-constexpr int combining_class(char32_t code_point) noexcept
-{
-    switch (code_point) {
-    case kCombiningHorn:
-        return 216;
-    case kCombiningDot:
-        return 220;
-    default:
-        return 230;
-    }
-}
-
-constexpr std::optional<char32_t> combining_tone(Tone tone) noexcept
-{
-    switch (tone) {
-    case Tone::Acute:
-        return kCombiningAcute;
-    case Tone::Grave:
-        return kCombiningGrave;
-    case Tone::Hook:
-        return kCombiningHook;
-    case Tone::Tilde:
-        return kCombiningTilde;
-    case Tone::Dot:
-        return kCombiningDot;
-    case Tone::None:
-        return std::nullopt;
-    }
-    return std::nullopt;
-}
-
-constexpr std::optional<Mark> mark_of_combining(char32_t code_point) noexcept
-{
-    switch (code_point) {
-    case kCombiningCircumflex:
-        return Mark::Circumflex;
-    case kCombiningBreve:
-        return Mark::Breve;
-    case kCombiningHorn:
-        return Mark::Horn;
-    default:
-        return std::nullopt;
-    }
-}
-
-constexpr std::optional<Tone> tone_of_combining(char32_t code_point) noexcept
-{
-    switch (code_point) {
-    case kCombiningAcute:
-        return Tone::Acute;
-    case kCombiningGrave:
-        return Tone::Grave;
-    case kCombiningHook:
-        return Tone::Hook;
-    case kCombiningTilde:
-        return Tone::Tilde;
-    case kCombiningDot:
-        return Tone::Dot;
-    default:
-        return std::nullopt;
-    }
-}
-
-std::string encode_nfd(std::u32string_view text)
-{
-    std::string out;
-    out.reserve(text.size() * 3);
-    for (const auto code_point : text) {
-        if (code_point <= 0x7F) {
-            out.push_back(static_cast<char>(code_point));
-            continue;
-        }
-        const auto decomposed = decompose(code_point);
-        if (!decomposed.has_value() || decomposed->letter.mark == Mark::Stroke) {
-            unicode::append(out, code_point);
-            continue;
-        }
-        const auto& letter = decomposed->letter;
-        unicode::append(out, letter.upper ? letter.base - 32 : letter.base);
-        // NFD is not just "base then marks": the marks have to be sorted by
-        // their combining class, which puts the dot below in front of the
-        // circumflex or the breve of the same letter (U+1ED9, U+1EC7, U+1EB7,
-        // U+1EAD).
-        const auto mark = combining_mark(letter.mark);
-        const auto tone = combining_tone(decomposed->tone);
-        if (mark && tone && combining_class(*tone) < combining_class(*mark)) {
-            unicode::append(out, *tone);
-            unicode::append(out, *mark);
-        } else {
-            if (mark) {
-                unicode::append(out, *mark);
-            }
-            if (tone) {
-                unicode::append(out, *tone);
-            }
-        }
-    }
-    return out;
-}
-
-std::u32string decode_nfd(std::string_view bytes)
-{
-    const auto code_points = unicode::decode(bytes);
-    std::u32string out;
-    out.reserve(code_points.size());
-
-    std::size_t index = 0;
-    while (index < code_points.size()) {
-        const auto code_point = code_points[index];
-        const auto decomposed = decompose(code_point);
-        if (!decomposed.has_value()) {
-            out.push_back(code_point);
-            ++index;
-            continue;
-        }
-
-        Letter letter = decomposed->letter;
-        Tone tone = decomposed->tone;
-        std::size_t next = index + 1;
-        while (next < code_points.size()) {
-            if (const auto mark = mark_of_combining(code_points[next]);
-                mark.has_value() && letter.mark == Mark::None) {
-                letter.mark = *mark;
-                ++next;
-                continue;
-            }
-            if (const auto combining = tone_of_combining(code_points[next]);
-                combining.has_value() && tone == Tone::None) {
-                tone = *combining;
-                ++next;
-                continue;
-            }
-            break;
-        }
-        out.push_back(compose(letter, tone));
-        index = next;
-    }
-    return out;
-}
-
 } // namespace
 
 std::u32string Converter::decode(Encoding encoding, std::string_view bytes)
@@ -455,7 +279,9 @@ std::u32string Converter::decode(Encoding encoding, std::string_view bytes)
     case Encoding::Unicode:
         return unicode::decode(bytes);
     case Encoding::UnicodeDecomposed:
-        return decode_nfd(bytes);
+        // Both spellings come back as precomposed code points, whatever
+        // normalization form the input used.
+        return unicode::decode(unicode::normalize(bytes, unicode::Normalization::Nfc));
     case Encoding::Tcvn3:
         return decode_tcvn3(bytes);
     case Encoding::Viqr:
@@ -470,7 +296,7 @@ std::string Converter::encode(Encoding encoding, std::u32string_view text)
     case Encoding::Unicode:
         return unicode::encode(text);
     case Encoding::UnicodeDecomposed:
-        return encode_nfd(text);
+        return unicode::normalize(unicode::encode(text), unicode::Normalization::Nfd);
     case Encoding::Tcvn3:
         return encode_tcvn3(text);
     case Encoding::Viqr:
@@ -489,17 +315,7 @@ std::string Converter::convert(std::string_view input, Encoding from, Encoding t
 
 std::string Converter::normalize(std::string_view utf8, Normalization form)
 {
-    switch (form) {
-    case Normalization::Nfc:
-        // decode_nfd() understands both spellings and composes them again.
-        return encode(Encoding::Unicode, decode(Encoding::UnicodeDecomposed, utf8));
-    case Normalization::Nfd:
-        // Compose first: decoding in NFD form collapses "o + circumflex + dot"
-        // into one letter whatever order the marks arrived in, and encoding
-        // decomposes the letters again in canonical order.
-        return encode(Encoding::UnicodeDecomposed, decode(Encoding::UnicodeDecomposed, utf8));
-    }
-    return std::string(utf8);
+    return unicode::normalize(utf8, form);
 }
 
 bool Converter::equal_normalized(std::string_view a, std::string_view b)
@@ -507,7 +323,8 @@ bool Converter::equal_normalized(std::string_view a, std::string_view b)
     if (a == b) {
         return true;
     }
-    return normalize(a, Normalization::Nfd) == normalize(b, Normalization::Nfd);
+    return unicode::normalize(a, Normalization::Nfd) ==
+           unicode::normalize(b, Normalization::Nfd);
 }
 
 } // namespace nexkey

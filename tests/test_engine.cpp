@@ -5,6 +5,7 @@
 #include "TestHarness.hpp"
 
 #include "nexkey/Engine.hpp"
+#include "nexkey/Unicode.hpp"
 
 using testing::telex_options;
 
@@ -156,3 +157,41 @@ TEST(engine_emoji_shortcuts)
     EXPECT_FALSE(engine.composing());
 }
 
+
+TEST(engine_macro_capitalization)
+{
+    // The shorthand decides the case of the expansion: VN means all capitals,
+    // Vn only capitalizes the first letter, vn keeps the text as it is.
+    nexkey::Engine engine;
+    engine.set_macros({{"vn", "Vi\u1EC7t Nam"}});
+
+    feed(engine, "vn");
+    EXPECT_EQ(engine.type(' ').commit, std::string("Vi\u1EC7t Nam "));
+
+    feed(engine, "Vn");
+    EXPECT_EQ(engine.type(' ').commit, std::string("Vi\u1EC7t Nam "));
+
+    feed(engine, "VN");
+    const auto all_caps = engine.type(' ').commit;
+    EXPECT_TRUE(nexkey::unicode::is_valid(all_caps));
+    if (nexkey::unicode::has_full_unicode()) {
+        EXPECT_EQ(all_caps, std::string("VI\u1EC6T NAM "));
+    } else {
+        // Without the Unicode database only ASCII letters change case.
+        EXPECT_EQ(all_caps, std::string("VI\u1EC7T NAM "));
+    }
+}
+
+TEST(engine_macro_capitalization_of_a_vietnamese_letter)
+{
+    // A macro that starts with a Vietnamese letter is capitalized as a whole
+    // letter, not by touching the first byte of its UTF-8 sequence.
+    nexkey::Engine engine;
+    engine.set_macros({{"ad", "\u0103n tr\u01B0a"}});
+    feed(engine, "Ad");
+    const auto step = engine.type(' ');
+    EXPECT_TRUE(nexkey::unicode::is_valid(step.commit));
+    if (nexkey::unicode::has_full_unicode()) {
+        EXPECT_EQ(step.commit, std::string("\u0102n tr\u01B0a "));
+    }
+}
