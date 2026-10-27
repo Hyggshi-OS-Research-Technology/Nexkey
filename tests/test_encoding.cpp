@@ -7,6 +7,10 @@
 #include "nexkey/Converter.hpp"
 #include "nexkey/Unicode.hpp"
 
+#include <cstddef>
+#include <string>
+#include <string_view>
+
 namespace {
 
 std::string encode(nexkey::Encoding encoding, const std::string& utf8)
@@ -97,4 +101,136 @@ TEST(engine_outputs_other_encodings)
 
     options.encoding = nexkey::Encoding::UnicodeDecomposed;
     EXPECT_EQ(testing::render_word("tieengs", options), std::string("tie\u0302\u0301ng"));
+}
+
+// ---------------------------------------------------------------------------
+// Unicode normalization
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// Combining classes of the marks of the Vietnamese alphabet, copied from the
+/// Unicode character database so that the test does not depend on the encoder
+/// it is checking.
+constexpr int combining_class(char32_t code_point)
+{
+    switch (code_point) {
+    case 0x031B: // combining horn
+        return 216;
+    case 0x0323: // combining dot below
+        return 220;
+    default:
+        return 230; // the accents that sit above the letter
+    }
+}
+
+} // namespace
+
+TEST(nfd_of_every_letter_is_canonical)
+{
+    // NFD is not "base letter, then the marks in typing order": UAX #15 sorts
+    // the marks by combining class. Writing the dot of ộ after its circumflex
+    // produces a string that looks right and is not NFD.
+    for (const char32_t base : {U'a', U'e', U'i', U'o', U'u', U'y'}) {
+        for (const nexkey::Mark mark : {nexkey::Mark::None, nexkey::Mark::Circumflex,
+                                        nexkey::Mark::Breve, nexkey::Mark::Horn}) {
+            for (const bool upper : {false, true}) {
+                for (int tone = 0; tone < 6; ++tone) {
+                    const auto letter = nexkey::compose(nexkey::Letter{base, mark, upper},
+                                                        static_cast<nexkey::Tone>(tone));
+                    const auto nfd = nexkey::unicode::decode(nexkey::Converter::encode(
+                        nexkey::Encoding::UnicodeDecomposed, std::u32string{letter}));
+
+                    EXPECT_FALSE(nfd.empty());
+                    EXPECT_EQ(nfd.front(), upper ? base - 32 : base);
+                    int previous = 0;
+                    for (std::size_t index = 1; index < nfd.size(); ++index) {
+                        EXPECT_TRUE(combining_class(nfd[index]) >= previous);
+                        previous = combining_class(nfd[index]);
+                    }
+                    EXPECT_EQ(nexkey::Converter::decode(
+                                  nexkey::Encoding::UnicodeDecomposed,
+                                  nexkey::unicode::encode(nfd)),
+                              std::u32string{letter});
+                }
+            }
+        }
+    }
+
+    // The stroked d has no decomposition at all.
+    EXPECT_EQ(encode(nexkey::Encoding::UnicodeDecomposed, "\u0111"), std::string("\u0111"));
+}
+
+TEST(nfd_puts_the_dot_below_in_front)
+{
+    // The four letters whose tone mark has a lower combining class than their
+    // vowel mark used to be written in the wrong order.
+    EXPECT_EQ(encode(nexkey::Encoding::UnicodeDecomposed, "\u1ED9"), std::string("o\u0323\u0302"));
+    EXPECT_EQ(encode(nexkey::Encoding::UnicodeDecomposed, "\u1EC7"), std::string("e\u0323\u0302"));
+    EXPECT_EQ(encode(nexkey::Encoding::UnicodeDecomposed, "\u1EAD"), std::string("a\u0323\u0302"));
+    EXPECT_EQ(encode(nexkey::Encoding::UnicodeDecomposed, "\u1EB7"), std::string("a\u0323\u0306"));
+    // The horn is lighter than the dot, so it stays in front (ự, ợ).
+    EXPECT_EQ(encode(nexkey::Encoding::UnicodeDecomposed, "\u1EF1"),
+              std::string("u\u031B\u0323"));
+    EXPECT_EQ(encode(nexkey::Encoding::UnicodeDecomposed, "\u1EE3"),
+              std::string("o\u031B\u0323"));
+}
+
+TEST(normalize_both_forms)
+{
+    const std::string nfc = "Ti\u1EBFng Vi\u1EC7t \u0111\u01B0\u1EE3c";
+    const std::string nfd = "Tie\u0302\u0301ng Vie\u0323\u0302t \u0111u\u031Bo\u031B\u0323c";
+
+    EXPECT_EQ(nexkey::Converter::normalize(nfd, nexkey::Normalization::Nfc), nfc);
+    EXPECT_EQ(nexkey::Converter::normalize(nfc, nexkey::Normalization::Nfd), nfd);
+    // Both forms are fixed points of their own normalization.
+    EXPECT_EQ(nexkey::Converter::normalize(nfd, nexkey::Normalization::Nfd), nfd);
+    EXPECT_EQ(nexkey::Converter::normalize(nfc, nexkey::Normalization::Nfc), nfc);
+    EXPECT_EQ(nexkey::Converter::normalize("", nexkey::Normalization::Nfd), std::string());
+}
+
+TEST(normalize_composes_mixed_input)
+{
+    // A precomposed letter followed by a combining mark is one letter.
+    EXPECT_EQ(nexkey::Converter::normalize("\u0103\u0301", nexkey::Normalization::Nfc),
+              std::string("\u1EAF"));
+    EXPECT_EQ(nexkey::Converter::normalize("a\u0306\u0301", nexkey::Normalization::Nfc),
+              std::string("\u1EAF"));
+    // The marks may arrive in any order; the result is canonical.
+    EXPECT_EQ(nexkey::Converter::normalize("a\u0301\u0302", nexkey::Normalization::Nfc),
+              std::string("\u1EA5"));
+    EXPECT_EQ(nexkey::Converter::normalize("o\u0302\u0323", nexkey::Normalization::Nfd),
+              std::string("o\u0323\u0302"));
+}
+
+TEST(normalize_leaves_other_text_alone)
+{
+    // Letters outside the Vietnamese alphabet keep the form they came in, and
+    // the text around them is not touched.
+    EXPECT_EQ(nexkey::Converter::normalize("na\u00EFve", nexkey::Normalization::Nfd),
+              std::string("na\u00EFve"));
+    EXPECT_EQ(nexkey::Converter::normalize("\u65E5\u672C\u8A9E", nexkey::Normalization::Nfc),
+              std::string("\u65E5\u672C\u8A9E"));
+    EXPECT_EQ(nexkey::Converter::normalize("\xF0\x9F\x98\x80 ok", nexkey::Normalization::Nfd),
+              std::string("\xF0\x9F\x98\x80 ok"));
+    // Malformed input is decoded with U+FFFD, so the output stays valid UTF-8.
+    const auto repaired = nexkey::Converter::normalize(std::string("\xFF\x41", 2),
+                                                       nexkey::Normalization::Nfd);
+    EXPECT_TRUE(nexkey::unicode::is_valid(repaired));
+}
+
+TEST(equal_normalized)
+{
+    const std::string nfc = "Ti\u1EBFng Vi\u1EC7t";
+    const std::string nfd = "Tie\u0302\u0301ng Vie\u0323\u0302t";
+    EXPECT_TRUE(nexkey::Converter::equal_normalized(nfc, nfd));
+    EXPECT_TRUE(nexkey::Converter::equal_normalized(nfd, nfc));
+    EXPECT_TRUE(nexkey::Converter::equal_normalized(nfc, nfc));
+    EXPECT_TRUE(nexkey::Converter::equal_normalized("", ""));
+
+    // Different text stays different, including one tone mark.
+    EXPECT_FALSE(nexkey::Converter::equal_normalized(nfc, "Ti\u1EBFng Vi\u1EC7n"));
+    EXPECT_FALSE(nexkey::Converter::equal_normalized("ti\u1EBFng", "ti\u1EC7ng"));
+    EXPECT_FALSE(nexkey::Converter::equal_normalized("na\u00EFve", "nai\u0308ve"));
+    EXPECT_FALSE(nexkey::Converter::equal_normalized(nfc, ""));
 }

@@ -298,6 +298,27 @@ constexpr std::optional<char32_t> combining_mark(Mark mark) noexcept
     }
 }
 
+/// Canonical combining class of the marks above (Unicode character database).
+///
+/// UAX #15 sorts the marks of a decomposition by this number, and the canonical
+/// decompositions of the Vietnamese letters depend on it: the horn (216) comes
+/// before the dot below (220), which comes before every accent that sits above
+/// the letter (230). Writing the dot of "o with a circumflex and a dot below"
+/// after the circumflex produces a string that looks right but is not NFD, and
+/// a client that normalises its document would then disagree with NexKey about
+/// the text.
+constexpr int combining_class(char32_t code_point) noexcept
+{
+    switch (code_point) {
+    case kCombiningHorn:
+        return 216;
+    case kCombiningDot:
+        return 220;
+    default:
+        return 230;
+    }
+}
+
 constexpr std::optional<char32_t> combining_tone(Tone tone) noexcept
 {
     switch (tone) {
@@ -365,11 +386,22 @@ std::string encode_nfd(std::u32string_view text)
         }
         const auto& letter = decomposed->letter;
         unicode::append(out, letter.upper ? letter.base - 32 : letter.base);
-        if (const auto mark = combining_mark(letter.mark)) {
-            unicode::append(out, *mark);
-        }
-        if (const auto tone = combining_tone(decomposed->tone)) {
+        // NFD is not just "base then marks": the marks have to be sorted by
+        // their combining class, which puts the dot below in front of the
+        // circumflex or the breve of the same letter (U+1ED9, U+1EC7, U+1EB7,
+        // U+1EAD).
+        const auto mark = combining_mark(letter.mark);
+        const auto tone = combining_tone(decomposed->tone);
+        if (mark && tone && combining_class(*tone) < combining_class(*mark)) {
             unicode::append(out, *tone);
+            unicode::append(out, *mark);
+        } else {
+            if (mark) {
+                unicode::append(out, *mark);
+            }
+            if (tone) {
+                unicode::append(out, *tone);
+            }
         }
     }
     return out;
@@ -453,6 +485,29 @@ std::string Converter::convert(std::string_view input, Encoding from, Encoding t
         return std::string(input);
     }
     return encode(to, decode(from, input));
+}
+
+std::string Converter::normalize(std::string_view utf8, Normalization form)
+{
+    switch (form) {
+    case Normalization::Nfc:
+        // decode_nfd() understands both spellings and composes them again.
+        return encode(Encoding::Unicode, decode(Encoding::UnicodeDecomposed, utf8));
+    case Normalization::Nfd:
+        // Compose first: decoding in NFD form collapses "o + circumflex + dot"
+        // into one letter whatever order the marks arrived in, and encoding
+        // decomposes the letters again in canonical order.
+        return encode(Encoding::UnicodeDecomposed, decode(Encoding::UnicodeDecomposed, utf8));
+    }
+    return std::string(utf8);
+}
+
+bool Converter::equal_normalized(std::string_view a, std::string_view b)
+{
+    if (a == b) {
+        return true;
+    }
+    return normalize(a, Normalization::Nfd) == normalize(b, Normalization::Nfd);
 }
 
 } // namespace nexkey

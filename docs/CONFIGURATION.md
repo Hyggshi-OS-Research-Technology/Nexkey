@@ -77,12 +77,12 @@ shortcut and the bracket shortcuts. `microsoft` layout uses the Windows Telex pr
 | `direct_typing` | `true`, `false` | `true` | Direct typing without preedit underlines (Non-preedit) |
 | `smart_backspace` | `true`, `false` | `true` | Skip keystrokes that had no visible effect when deleting |
 | `english_fallback` | `true`, `false` | `true` | Auto-restore raw keystrokes when typing non-Vietnamese words |
-| `spell_check` | `true`, `false` | `true` | Enable dictionary-based spell checking and plausibility |
+| `spell_check` | `true`, `false` | `true` | Reserved for the dictionary-based spell check; stored and exported, but not consulted by the engine yet |
 | `macro_enabled` | `true`, `false` | `true` | Enable macro shorthand expansion |
 | `capitalize_macro` | `true`, `false` | `true` | Auto-capitalize macro expansions when abbreviation is capitalized |
-| `custom_dict` | `true`, `false` | `false` | Enable personal custom dictionary |
+| `custom_dict` | `true`, `false` | `false` | Reserved for the personal dictionary; stored and exported, but not consulted by the engine yet |
 | `bracket_shortcuts` | `true`, `false` | `true` | `[`, `]`, `{`, `}` produce the horned vowels in Telex |
-| `candidates` | `true`, `false` | `false` | Show the word selection window with the alternative readings |
+| `candidates` | `true`, `false` | `true` | Show the word selection window with the alternative readings |
 
 ### `[macro]`
 
@@ -106,7 +106,11 @@ Per-application input rules. Examples:
 
 ### `[custom_dictionary]`
 
-Personal custom dictionary words (one per line, e.g. `kubernetes=1`).
+Personal custom dictionary words (one per line, e.g. `kubernetes=1`). They are
+stored, exported and imported, and they will be the input of the dictionary
+based restore described in [ARCHITECTURE.md](ARCHITECTURE.md#english-text); the
+engine does not read them yet. Until then the fallback only restores words that
+cannot be a Vietnamese syllable at all.
 
 ### `[ui]`
 

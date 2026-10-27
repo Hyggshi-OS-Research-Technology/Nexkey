@@ -79,7 +79,24 @@ and emoji modifiers that follow it. The rules that need full Unicode tables
    `Converter::encode` turns it into the requested charset.
 6. When the composed word is not a plausible Vietnamese word and
    `english_fallback` is enabled, the engine returns the raw keystrokes
-   instead, so English words are never mangled.
+   instead.
+
+### English text
+
+The fallback of step 6 is structural: `detail::analyse` only knows which letter
+sequences can form a Vietnamese syllable. That is enough for words that cannot
+be Vietnamese at all (`windows`, `jazz`, `https`, `git` - `f`, `j`, `w` and `z`
+are not onsets, `nd`, `rk` and `ss` are not codas) and it is not enough for
+words that happen to spell a valid syllable: typing `test` produces `tét`,
+`last` produces `lát` and `car` produces `cả`, because the tone key is a letter
+of an otherwise valid word. `tests/test_telex.cpp` pins both lists, so the
+behaviour cannot drift unnoticed.
+
+Separating those words needs a dictionary, which is what the `spell_check` and
+`custom_dict` options and the `[custom_dictionary]` section are for. The options
+are parsed, stored, exported and shown in the tray and in the settings window,
+but the engine does not read them yet; until it does, the docs say so and the
+tray toggles change nothing about the text.
 
 ### Engine state
 
@@ -137,11 +154,27 @@ registration and source locations in failure messages. The tests exercise the
 public API of the core, plus the internal syllable helpers, so a regression in
 tone placement fails immediately.
 
+`tests/test_vietnamese_words.cpp` keeps a corpus of Vietnamese words with the
+Telex and VNI keystrokes that produce them. Besides the expected text it checks
+three properties for every word: the state after each keystroke equals rendering
+that prefix from scratch (a keystroke may not depend on anything older than the
+word itself), Backspace walks those states in reverse (the raw keystrokes are
+kept, so undo is exact), and every commit is well formed UTF-8 in both Unicode
+forms. `tests/test_unicode.cpp` adds property tests for the byte level helpers,
+and the decoder agrees with the reference implementation of the Unicode
+standard on a few thousand malformed byte strings.
+
 ## Charsets
 
 - **Unicode** is precomposed UTF-8, the format every modern application expects.
-- **Unicode decomposed** stores base letters plus combining marks, which is
-  what some older transfer formats and normalisation sensitive tools expect.
+- **Unicode decomposed** stores base letters plus combining marks in canonical
+  order, which is what some older transfer formats and normalisation sensitive
+  tools expect. Canonical order means the marks are sorted by combining class
+  (UAX #15), not by the order in which they were typed: the dot below of `ộ`
+  comes before its circumflex. `Converter::normalize` rewrites a string in
+  either form and `Converter::equal_normalized` compares two strings that may
+  use different forms, which is what a frontend needs when it compares the
+  document with what it wrote.
 - **TCVN3** is a single byte legacy charset from the DOS era. Vietnamese
   letters live in the `0xA1` to `0xFE` range and the case of an accented letter
   is not stored.

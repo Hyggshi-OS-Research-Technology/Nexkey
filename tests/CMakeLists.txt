@@ -8,6 +8,7 @@ add_executable(nexkey-tests
     test_syllable.cpp
     test_telex.cpp
     test_unicode.cpp
+    test_vietnamese_words.cpp
     test_vni_viqr.cpp
 )
 

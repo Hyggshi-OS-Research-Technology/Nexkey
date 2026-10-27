@@ -135,3 +135,50 @@ TEST(telex_sentences)
     EXPECT_EQ(type_text("tieengs "), std::string("ti\u1EBFng "));
     EXPECT_EQ(type_text("a.b"), std::string("a.b"));
 }
+
+TEST(telex_english_words_that_cannot_be_vietnamese)
+{
+    // The structural fallback is enough for words that cannot be a Vietnamese
+    // syllable at all: 'f', 'j', 'w' and 'z' are not Vietnamese onsets, and
+    // "nd", "rk", "rd" and "ss" are not codas.
+    const char* words[] = {"windows", "hello", "world", "jazz", "fix", "for",  "while",
+                           "return",  "struct", "git",   "http", "python", "java", "linux",
+                           "kernel",  "cache",  "index", "node", "quick",  "fox"};
+    for (const char* word : words) {
+        EXPECT_EQ(type_text(word), std::string(word));
+    }
+}
+
+TEST(telex_english_words_that_need_the_dictionary)
+{
+    // The words below *can* be read as Vietnamese syllables, so the structural
+    // check accepts them and the tone key is swallowed: typing "test" produces
+    // "tét" instead of "test". Only a dictionary can tell the two apart, and
+    // the spell_check / custom_dictionary options are parsed and stored but not
+    // consulted by the engine yet (see docs/ARCHITECTURE.md, "English text").
+    //
+    // The expectations record today's behaviour on purpose: whoever wires the
+    // dictionary in has to update this test instead of silently changing what
+    // users see.
+    struct Gap {
+        const char* typed;
+        const char* produced;
+    };
+    const Gap gaps[] = {
+        {"car", "c\u1EA3"},    {"bar", "b\u1EA3"},     {"her", "h\u1EBB"},
+        {"sir", "s\u1EC9"},    {"six", "s\u0129"},     {"mix", "m\u0129"},
+        {"box", "b\u00F5"},    {"test", "t\u00E9t"},   {"text", "t\u1EBDt"},
+        {"next", "n\u1EBDt"},  {"last", "l\u00E1t"},   {"rest", "r\u00E9t"},
+        {"must", "m\u00FAt"},  {"list", "l\u00EDt"},   {"rust", "r\u00FAt"},
+        {"trust", "tr\u00FAt"},{"docs", "d\u00F3c"},   {"buffer", "buf\u1EBB"},
+        {"xerox", "x\u1EBDo"}, {"wasp", "\u1EE9ap"},
+        // The Telex escape eats the doubled key as well, so these lose a letter.
+        {"pass", "pas"},       {"boss", "bos"},       {"mass", "mas"},
+        {"tasks", "taks"},     {"tests", "tets"},     {"hosts", "hots"},
+        {"array", "aray"},     {"class", "clas"},     {"mississippi", "misisippi"},
+        {"password", "pasw\u1ECFd"},
+    };
+    for (const auto& gap : gaps) {
+        EXPECT_EQ(type_text(gap.typed), std::string(gap.produced));
+    }
+}
