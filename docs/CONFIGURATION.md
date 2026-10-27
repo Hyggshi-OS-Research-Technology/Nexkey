@@ -27,7 +27,7 @@ encoding=unicode
 smart_backspace=true
 english_fallback=true
 bracket_shortcuts=true
-candidates=false
+candidates=true
 direct_typing=true
 spell_check=true
 macro_enabled=true
@@ -80,7 +80,7 @@ shortcut and the bracket shortcuts. `microsoft` layout uses the Windows Telex pr
 | `spell_check` | `true`, `false` | `true` | Reserved for the dictionary-based spell check; stored and exported, but not consulted by the engine yet |
 | `macro_enabled` | `true`, `false` | `true` | Enable macro shorthand expansion |
 | `capitalize_macro` | `true`, `false` | `true` | Auto-capitalize macro expansions when abbreviation is capitalized |
-| `custom_dict` | `true`, `false` | `false` | Reserved for the personal dictionary; stored and exported, but not consulted by the engine yet |
+| `custom_dict` | `true`, `false` | `false` | Use the `[custom_dictionary]` words: they are committed exactly as typed |
 | `bracket_shortcuts` | `true`, `false` | `true` | `[`, `]`, `{`, `}` produce the horned vowels in Telex |
 | `candidates` | `true`, `false` | `true` | Show the word selection window with the alternative readings |
 
@@ -106,11 +106,11 @@ Per-application input rules. Examples:
 
 ### `[custom_dictionary]`
 
-Personal custom dictionary words (one per line, e.g. `kubernetes=1`). They are
-stored, exported and imported, and they will be the input of the dictionary
-based restore described in [ARCHITECTURE.md](ARCHITECTURE.md#english-text); the
-engine does not read them yet. Until then the fallback only restores words that
-cannot be a Vietnamese syllable at all.
+Personal custom dictionary words, one per line. A word from this list is
+committed exactly as typed, so `test`, `docs` or `build` stop turning into
+Vietnamese approximations, while `car` still gives `cả` unless it is listed
+too. The list takes effect when `custom_dict=true`; the lookup ignores ASCII
+case. See [ARCHITECTURE.md](ARCHITECTURE.md#english-text).
 
 ### `[ui]`
 

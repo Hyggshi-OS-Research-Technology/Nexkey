@@ -9,6 +9,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace nexkey {
@@ -80,6 +81,16 @@ public:
     [[nodiscard]] Step commit_candidate(std::size_t index);
 
     /// Set macros (e.g. "vn" -> "Việt Nam", ":heart:" -> "❤️").
+    /// Words that are always committed as typed, even when the rules would give
+    /// them Vietnamese diacritics. They come from the `[custom_dictionary]`
+    /// section of the configuration and only take effect while
+    /// Options::custom_dict is on.
+    void set_custom_words(std::vector<std::string> words);
+    [[nodiscard]] const std::vector<std::string>& custom_words() const noexcept
+    {
+        return m_custom_words;
+    }
+
     void set_macros(std::unordered_map<std::string, std::string> macros)
     {
         m_macros = std::move(macros);
@@ -99,6 +110,9 @@ private:
 
     Options m_options;
     std::unordered_map<std::string, std::string> m_macros;
+    std::vector<std::string> m_custom_words;
+    /// m_custom_words with ASCII letters lower cased, for the lookup.
+    std::unordered_set<std::string> m_custom_lookup;
     std::string m_raw;
     std::string m_preedit;
     std::vector<std::string> m_history;

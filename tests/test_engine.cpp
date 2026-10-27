@@ -195,3 +195,53 @@ TEST(engine_macro_capitalization_of_a_vietnamese_letter)
         EXPECT_EQ(step.commit, std::string("\u0102n tr\u01B0a "));
     }
 }
+
+TEST(engine_custom_dictionary_keeps_words_as_typed)
+{
+    // "test" would be "tét" under the Telex rules. A user who types it every day
+    // puts it in the personal dictionary and gets it back unchanged.
+    nexkey::Options options;
+    options.custom_dict = true;
+    nexkey::Engine engine(options);
+    engine.set_custom_words({"test", "docs", "build"});
+
+    feed(engine, "test");
+    EXPECT_EQ(engine.type(' ').commit, std::string("test "));
+
+    feed(engine, "docs");
+    EXPECT_EQ(engine.type(' ').commit, std::string("docs "));
+
+    // The lookup ignores ASCII case, like the macro shorthand does.
+    feed(engine, "Test");
+    EXPECT_EQ(engine.type(' ').commit, std::string("Test "));
+
+    // Words outside the list keep following the Vietnamese rules: "next" is not
+    // in it, so the tone key still turns it into "nẽt".
+    feed(engine, "next");
+    EXPECT_EQ(engine.type(' ').commit, std::string("nẽt "));
+
+    // And so do Vietnamese words: the dictionary is a list of exceptions.
+    feed(engine, "vieejt");
+    EXPECT_EQ(engine.type(' ').commit, std::string("vi\u1EC7t "));
+}
+
+TEST(engine_custom_dictionary_needs_the_switch)
+{
+    // The word list is stored either way, but Options::custom_dict decides
+    // whether it is used, so a user can turn the feature off without losing the
+    // entries.
+    nexkey::Options options;
+    options.custom_dict = false;
+    nexkey::Engine engine(options);
+    engine.set_custom_words({"test"});
+    EXPECT_EQ(engine.custom_words().size(), std::size_t{1});
+
+    feed(engine, "test");
+    EXPECT_EQ(engine.type(' ').commit, std::string("tét "));
+
+    nexkey::Options enabled = options;
+    enabled.custom_dict = true;
+    engine.set_options(enabled);
+    feed(engine, "test");
+    EXPECT_EQ(engine.type(' ').commit, std::string("test "));
+}

@@ -41,7 +41,7 @@ with CMake.
 - **Dynamic `$TIME` / `$DATE` Macros**: Macro expansions support dynamic placeholders `$TIME` and `$DATE` (e.g. `kg` → `khô gà $TIME`), customizable via `Time Format` and `Date Format`.
 - **Keyboard Presets**: Built-in support for popular layouts: Telex, Simple Telex, VNI, VIQR, and Microsoft layout with one-click preset switching.
 - **Smart Emoji Picker**: Fast emoji search with fuzzy matching and a 9-recent-emoji history row with instant clipboard copying.
-- **Non-Vietnamese Fallback**: Restores the raw keystrokes when a word cannot be Vietnamese, so `windows`, `jazz`, `https` and `git` come out as typed. Words that do spell a valid syllable (`test`, `last`) still need the dictionary, which is not wired in yet.
+- **Non-Vietnamese Fallback**: Restores the raw keystrokes when a word cannot be Vietnamese, so `windows`, `jazz`, `https` and `git` come out as typed. Words that do spell a valid syllable (`test`, `last`) are kept as typed when they are listed in the personal dictionary.
 - **Linux Native & Stable**: Seamlessly compatible with Wayland, X11, Chromium, Electron, and Wine. Zero character loss on space or window focus changes.
 
 ## Quick Settings (System Tray)
@@ -55,7 +55,7 @@ Right-click the NexKey system tray icon to access quick settings:
 | **Macro** | Enable/disable macro shorthand expansion | On |
 | **Capitalize Macro** | Auto-capitalize macro expansions when shorthand is capitalized | On |
 | **Auto Non-VN Restore** | Automatically restore non-Vietnamese words | On |
-| **Custom Dictionary** | Reserved for the personal dictionary (stored, not used by the engine yet) | Off |
+| **Custom Dictionary** | Commit the words of `[custom_dictionary]` exactly as typed | Off |
 | **Direct Typing** | Direct typing without preedit underline (Non-preedit) | On |
 | **Emoji Picker...** | Open the smart emoji picker dialog | — |
 

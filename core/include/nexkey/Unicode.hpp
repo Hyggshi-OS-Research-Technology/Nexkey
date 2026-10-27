@@ -172,6 +172,14 @@ struct Prefix {
 /// characters of the string.
 [[nodiscard]] std::size_t grapheme_boundary(std::string_view text, std::size_t clusters);
 
+/// Lower case the ASCII letters of `text`, leaving every other byte alone.
+///
+/// This is the lowering used for configuration keys, macro shorthand and the
+/// personal dictionary. It is deliberately not `std::tolower`, whose result
+/// depends on the locale in effect: under `tr_TR.UTF-8` an uppercase I becomes
+/// a dotless i, which would stop `INPUT` from matching `input`.
+[[nodiscard]] std::string lower_ascii(std::string_view text);
+
 /// Uppercase a UTF-8 string. With ICU this is the full Unicode case mapping
 /// ("vi\u1EC7t nam" becomes "VI\u1EC6T NAM"); without it only ASCII letters change.
 [[nodiscard]] std::string upper(std::string_view text);

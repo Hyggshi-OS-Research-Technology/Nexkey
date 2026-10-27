@@ -53,6 +53,19 @@ const std::string* Engine::find_macro(std::string_view raw) const
     return nullptr;
 }
 
+void Engine::set_custom_words(std::vector<std::string> words)
+{
+    m_custom_words = std::move(words);
+    m_custom_lookup.clear();
+    m_custom_lookup.reserve(m_custom_words.size());
+    for (const auto& word : m_custom_words) {
+        std::string lowered = unicode::lower_ascii(word);
+        if (!lowered.empty()) {
+            m_custom_lookup.insert(std::move(lowered));
+        }
+    }
+}
+
 void Engine::reset_state()
 {
     m_raw.clear();
@@ -68,7 +81,12 @@ void Engine::discard()
 namespace {
 
 /// Render a word of raw keystrokes with an explicit option set.
-std::string render_with(std::string_view raw, const Options& options)
+///
+/// `custom` is the personal dictionary, or nullptr when the engine has none. A
+/// word from the list is committed exactly as typed, which is how a user keeps
+/// "test" or "docs" from turning into Vietnamese.
+std::string render_with(std::string_view raw, const Options& options,
+                        const std::unordered_set<std::string>* custom)
 {
     if (raw.empty()) {
         return {};
@@ -77,11 +95,21 @@ std::string render_with(std::string_view raw, const Options& options)
         return std::string(raw);
     }
     const auto word = detail::parse(options.method, raw, options);
+    auto composed = Converter::encode(options.encoding, detail::compose_word(word, options));
+    if (composed == raw) {
+        return composed;
+    }
     if (options.english_fallback && !word.escaped &&
         !detail::is_plausible(word.to_letters())) {
         return std::string(raw);
     }
-    return Converter::encode(options.encoding, detail::compose_word(word, options));
+    // The personal dictionary wins over the rules: the user already wrote this
+    // word down, so it is not a Vietnamese word that happens to look English.
+    if (options.custom_dict && custom != nullptr &&
+        custom->contains(unicode::lower_ascii(raw))) {
+        return std::string(raw);
+    }
+    return composed;
 }
 
 bool contains(const std::vector<Candidate>& candidates, const std::string& text)
@@ -145,7 +173,7 @@ std::string expand_macro_text(std::string text, std::string_view raw, const Opti
 
 std::string Engine::render(std::string_view raw) const
 {
-    return render_with(raw, m_options);
+    return render_with(raw, m_options, &m_custom_lookup);
 }
 
 std::vector<Candidate> Engine::candidates() const
@@ -166,7 +194,8 @@ std::vector<Candidate> Engine::candidates() const
         alternative.tone_style = m_options.tone_style == ToneStyle::Modern
                                      ? ToneStyle::Traditional
                                      : ToneStyle::Modern;
-        if (const auto text = render_with(m_raw, alternative); !contains(result, text)) {
+        if (const auto text = render_with(m_raw, alternative, &m_custom_lookup);
+            !contains(result, text)) {
             result.push_back(Candidate{text, std::string(to_string(alternative.tone_style))});
         }
     }

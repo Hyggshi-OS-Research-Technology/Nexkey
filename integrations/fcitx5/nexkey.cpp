@@ -420,6 +420,7 @@ private:
             }
             state->engine.set_options(opts);
             state->engine.set_macros(settings_.macros);
+            state->engine.set_custom_words(settings_.custom_dictionary);
         }
         return *state;
     }

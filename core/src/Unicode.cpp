@@ -634,6 +634,17 @@ Prefix common_prefix(std::string_view a, std::string_view b) noexcept
     return prefix;
 }
 
+std::string lower_ascii(std::string_view text)
+{
+    std::string out(text);
+    for (char& character : out) {
+        if (character >= 'A' && character <= 'Z') {
+            character = static_cast<char>(character - 'A' + 'a');
+        }
+    }
+    return out;
+}
+
 std::string upper(std::string_view text)
 {
     if (text.empty()) {

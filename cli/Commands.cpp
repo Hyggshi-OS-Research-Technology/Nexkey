@@ -191,10 +191,12 @@ bool apply_config(Settings& settings, std::string_view key, std::string_view val
     return true;
 }
 
-std::string compose_line(const std::string& line, const Options& options, bool trace,
+std::string compose_line(const std::string& line, const Options& options,
+                         const std::vector<std::string>& custom_words, bool trace,
                          std::ostream& trace_out)
 {
     Engine engine(options);
+    engine.set_custom_words(custom_words);
     std::string out;
     std::size_t index = 0;
     for (const char key : line) {
@@ -219,7 +221,8 @@ int run_test(const Args& args)
         return 2;
     }
 
-    auto options = load_settings().options;
+    const auto settings = load_settings();
+    auto options = settings.options;
     if (const auto value = parser.value("method")) {
         const auto method = method_from_string(*value);
         if (!method) {
@@ -271,9 +274,11 @@ int run_test(const Args& args)
 
     const bool show_candidates = parser.has("candidates");
     for (const auto& line : lines) {
-        std::cout << compose_line(line, options, trace, std::cout) << '\n';
+        std::cout << compose_line(line, options, settings.custom_dictionary, trace, std::cout)
+                  << '\n';
         if (show_candidates) {
             Engine engine(options);
+            engine.set_custom_words(settings.custom_dictionary);
             for (const char key : line) {
                 static_cast<void>(engine.type(key));
             }

@@ -74,6 +74,7 @@ struct Session {
         settings = nexkey::load_settings(path);
         engine.set_options(settings.options);
         engine.set_macros(settings.macros);
+        engine.set_custom_words(settings.custom_dictionary);
         toggle = parse_toggle(settings.toggle_key);
     }
 
@@ -310,6 +311,7 @@ void apply_mode(IBusEngine* engine, Session& session)
 {
     session.engine.set_options(session.settings.options);
     session.engine.set_macros(session.settings.macros);
+    session.engine.set_custom_words(session.settings.custom_dictionary);
     session.engine.discard();
     session.candidates.clear();
     ibus_engine_hide_lookup_table(engine);

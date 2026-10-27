@@ -115,11 +115,17 @@ words that happen to spell a valid syllable: typing `test` produces `tét`,
 of an otherwise valid word. `tests/test_telex.cpp` pins both lists, so the
 behaviour cannot drift unnoticed.
 
-Separating those words needs a dictionary, which is what the `spell_check` and
-`custom_dict` options and the `[custom_dictionary]` section are for. The options
-are parsed, stored, exported and shown in the tray and in the settings window,
-but the engine does not read them yet; until it does, the docs say so and the
-tray toggles change nothing about the text.
+Separating those words needs a dictionary, and the engine cannot guess which of
+two valid readings a user meant. `Engine::set_custom_words` takes the words of
+the `[custom_dictionary]` section, and a word from that list is committed exactly
+as typed: `Options::custom_dict` switches the list on, the frontends hand it over
+on every configuration reload, and `nexkey test` uses it as well. So a user who
+types `test` and `docs` all day writes those words down once and keeps the
+Vietnamese rules for everything else, including `cả`, which is spelled `car`.
+
+`spell_check` is still reserved: it is stored, exported and shown in the tray,
+but the structural check runs whenever `english_fallback` is on. The dictionary
+it describes needs a Vietnamese word list, which is a separate change.
 
 ### Engine state
 
@@ -127,6 +133,25 @@ tray toggles change nothing about the text.
 history stack of raw keystrokes used by the smart backspace. Word boundaries
 (space, punctuation) commit the preedit plus the boundary character and start a
 new word. `flush` commits the pending composition, `discard` drops it.
+
+### Normalization
+
+The engine composes while it types, so the preedit and the committed text are
+NFC: one code point per Vietnamese letter. Input that arrives in NFD is
+understood as well, because the parser decodes a mark either way, so pasting
+`e` followed by U+0302 and U+0301 behaves exactly like typing `ee'`.
+
+The `unicode-decomposed` charset writes the other form. Its marks are sorted by
+combining class, the rule of UAX #15: the horn (216) comes before the dot below
+(220), which comes before the marks that sit above the letter (230). Writing
+them in the order they were typed looks right but is not NFD, and a client that
+normalizes its document would then disagree with NexKey about the same word.
+
+`Converter::normalize(text, Normalization::Nfc)` and the `Nfd` counterpart
+rewrite a string in either form, and `Converter::equal_normalized(a, b)` compares
+two spellings of one word. Both touch only the letters of the Vietnamese
+alphabet: a string without a Vietnamese letter in it comes back unchanged, so
+the engine never rewrites text it does not understand.
 
 ## Frontends
 
