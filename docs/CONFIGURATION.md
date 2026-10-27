@@ -74,7 +74,7 @@ shortcut and the bracket shortcuts. `microsoft` layout uses the Windows Telex pr
 
 | Key | Values | Default | Meaning |
 | --- | --- | --- | --- |
-| `direct_typing` | `true`, `false` | `true` | Direct typing without preedit underlines (Non-preedit) |
+| `direct_typing` | `true`, `false` | `true` | Direct typing without preedit underlines (Non-preedit); an application that drops a replacement is moved to the next safer path automatically |
 | `smart_backspace` | `true`, `false` | `true` | Skip keystrokes that had no visible effect when deleting |
 | `english_fallback` | `true`, `false` | `true` | Auto-restore raw keystrokes when typing non-Vietnamese words |
 | `spell_check` | `true`, `false` | `true` | Reserved for the dictionary-based spell check; stored and exported, but not consulted by the engine yet |
@@ -99,10 +99,33 @@ shortcut and the bracket shortcuts. `microsoft` layout uses the Windows Telex pr
 
 ### `[app_rules]`
 
-Per-application input rules. Examples:
-- `code=telex` (always use Telex in VS Code)
-- `gnome-terminal=off` (bypass Vietnamese composition in terminal)
-- `firefox=vni` (use VNI when browsing)
+Per-application rules, keyed by the process name of the program. A value can
+name an input method, a delivery mode, or both joined with `+` or `,`
+(`code=telex+preedit`), and each half is honoured independently:
+
+| Value | Effect |
+| --- | --- |
+| `telex`, `telex-simple`, `vni`, `viqr`, `microsoft` | input method for that program |
+| `off` (or `en`, `english`) | the program gets the keystrokes untouched |
+| `direct` | type straight into the document, delete with `deleteSurroundingText` when the program reports its text |
+| `direct-keys` | type straight into the document, delete with forwarded `BackSpace` keys; slower, but programs that ignore `deleteSurroundingText` still work |
+| `preedit` | show the word with an underline and commit it once; the slowest and the most compatible |
+
+```ini
+[app_rules]
+code=telex
+gnome-terminal=off
+firefox=vni
+chrome=preedit
+libreoffice=telex+direct-keys
+```
+
+NexKey writes a rule itself when it catches an application dropping a
+replacement: the word on screen is repaired first, and the second failure in a
+row saves the next step of the ladder (`direct` to `direct-keys` to `preedit`)
+here. Only the delivery half is rewritten, so a method that was set for the same
+program survives. Deleting the line, or `nexkey config set app_rules.<program>
+auto`, makes NexKey try the faster path again.
 
 ### `[custom_dictionary]`
 
@@ -169,6 +192,8 @@ nexkey config get input.method
 nexkey config set input.method vni
 nexkey config set engine.english_fallback false
 nexkey config set engine.candidates false
+nexkey config set app_rules.chrome preedit     # one program, see [app_rules]
+nexkey config set app_rules.code direct-keys   # or back to "auto" to forget it
 nexkey config path            # print the path of the configuration file
 nexkey status                 # same values, plus the current mode
 nexkey toggle                 # switch between VI and EN mode

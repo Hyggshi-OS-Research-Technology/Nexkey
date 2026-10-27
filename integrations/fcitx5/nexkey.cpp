@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // NexKey - Fcitx5 input method addon.
 
+#include "nexkey/Delivery.hpp"
 #include "nexkey/Engine.hpp"
 #include "nexkey/Settings.hpp"
 #include "nexkey/Status.hpp"
@@ -128,8 +129,15 @@ public:
     /// Value of the addon wide configuration generation the options above
     /// were taken from.
     unsigned generation{0};
-    /// Characters already committed directly to the client in direct typing mode.
-    std::string committed_text;
+    /// The text direct typing wrote and believes is in the document, plus the
+    /// last edit the client has not confirmed yet.
+    nexkey::DirectSession direct;
+    /// Replacements the application verifiably dropped in a row, so that one
+    /// hiccup does not change the configuration.
+    unsigned dropped{0};
+    /// Delivery mode this state was last used with. A switch between direct and
+    /// preedit mid-word would type the word twice, so it drops the word.
+    nexkey::DeliveryMode mode{nexkey::DeliveryMode::Direct};
     /// Times at which the document did not contain what direct typing wrote.
     std::vector<std::chrono::steady_clock::time_point> mismatches;
 };
@@ -149,12 +157,20 @@ inline std::string utf8_prefix_chars(std::string_view text, std::size_t chars)
     return std::string(text.substr(0, nexkey::unicode::prefix_length(text, chars)));
 }
 
-void delete_characters(fcitx::InputContext* ic, std::size_t count)
+/// Remove `count` characters before the cursor.
+///
+/// The two strategies are not interchangeable: deleteSurroundingText is exact
+/// but some toolkits accept the request and ignore it, while a forwarded
+/// BackSpace goes through the application's own key handling, which every
+/// toolkit gets right. Which one is used is decided per application by
+/// nexkey::DeliveryPolicy.
+void delete_characters(fcitx::InputContext* ic, std::size_t count, nexkey::DeleteStrategy strategy)
 {
     if (count == 0 || ic == nullptr) {
         return;
     }
-    if (ic->capabilityFlags().test(fcitx::CapabilityFlag::SurroundingText) &&
+    if (strategy == nexkey::DeleteStrategy::SurroundingText &&
+        ic->capabilityFlags().test(fcitx::CapabilityFlag::SurroundingText) &&
         ic->surroundingText().isValid()) {
         const auto& st = ic->surroundingText();
         if (st.cursor() != st.anchor()) {
@@ -169,6 +185,18 @@ void delete_characters(fcitx::InputContext* ic, std::size_t count)
             ic->forwardKey(fcitx::Key(FcitxKey_BackSpace), false);
             ic->forwardKey(fcitx::Key(FcitxKey_BackSpace), true);
         }
+    }
+}
+
+/// Apply one planned edit to the client: delete what the word no longer needs,
+/// then type the rest.
+void apply_edit(fcitx::InputContext* ic, const nexkey::Edit& edit, nexkey::DeleteStrategy strategy)
+{
+    if (edit.delete_code_points > 0) {
+        delete_characters(ic, edit.delete_code_points, strategy);
+    }
+    if (!edit.commit.empty()) {
+        ic->commitString(edit.commit);
     }
 }
 
@@ -210,6 +238,7 @@ public:
             state->generation = generation_;
             state->engine.set_options(settings_.options);
             state->engine.set_macros(settings_.macros);
+            state->engine.set_custom_words(settings_.custom_dictionary);
             return state;
         })
     {
@@ -275,17 +304,17 @@ public:
         // App Rules: check if application is configured to bypass Vietnamese input
         if (!settings_.app_rules.empty()) {
             if (auto it = settings_.app_rules.find(ic->program()); it != settings_.app_rules.end()) {
-                if (it->second == "off" || it->second == "en" || it->second == "english") {
+                if (nexkey::parse_app_rule(it->second).off) {
                     commit_all(ic, state);
                     return;
                 }
             }
         }
 
-        // Verify that earlier direct typing really reached the document, learn
-        // from applications where it does not, and publish the status for the
-        // diagnostics page.
-        check_direct_health(ic, state);
+        // Check what the application did with the previous replacement before
+        // planning the next one, then publish the status for the diagnostics
+        // page.
+        verify_direct(ic, state);
         publish_status(ic, state);
 
         if (key.sym() == FcitxKey_BackSpace) {
@@ -299,11 +328,13 @@ public:
                 // application handle its own BackSpace instead of relying on
                 // deleteSurroundingText, which many clients silently ignore.
                 const std::string new_preedit(state.engine.preedit());
-                const std::string& old_text = state.committed_text;
+                const std::string_view old_text = state.direct.text();
                 if (new_preedit.size() < old_text.size() &&
                     old_text.compare(0, new_preedit.size(), new_preedit) == 0 &&
                     utf8_char_count(old_text) - utf8_char_count(new_preedit) == 1) {
-                    state.committed_text = new_preedit;
+                    // The document changes without an edit from us, so the
+                    // session only takes note of the new end of the word.
+                    state.direct.adopt(new_preedit);
                     ic->inputPanel().setClientPreedit(fcitx::Text{});
                     update_candidates(ic, state);
                     ic->updatePreedit();
@@ -337,17 +368,12 @@ public:
         }
         if (!step.commit.empty()) {
             if (use_direct_typing(ic)) {
-                const auto prefix = nexkey::unicode::common_prefix(state.committed_text, step.commit);
-                const std::size_t old_total_chars = utf8_char_count(state.committed_text);
-                const std::size_t chars_to_delete = old_total_chars - prefix.code_points;
-                if (chars_to_delete > 0) {
-                    delete_characters(ic, chars_to_delete);
-                }
-                if (prefix.bytes < step.commit.size()) {
-                    const std::string suffix = step.commit.substr(prefix.bytes);
-                    ic->commitString(suffix);
-                }
-                state.committed_text.clear();
+                const auto decision = delivery_decision(ic);
+                apply_edit(ic, state.direct.replace(step.commit), decision.strategy);
+                // The word is finished: the next one starts from an empty
+                // document tail, so nothing of this word can be deleted by
+                // accident later.
+                state.direct.reset();
             } else {
                 ic->commitString(step.commit);
             }
@@ -372,7 +398,9 @@ public:
     {
         static_cast<void>(entry);
         if (auto* ic = event.inputContext(); ic != nullptr) {
-            commit_all(ic, state_of(ic));
+            auto& state = state_of(ic);
+            commit_all(ic, state);
+            state.direct.reset();
         }
     }
 
@@ -382,6 +410,7 @@ public:
         if (auto* ic = event.inputContext(); ic != nullptr) {
             auto& state = state_of(ic);
             commit_all(ic, state);
+            state.direct.reset();
         }
     }
 
@@ -413,7 +442,8 @@ private:
             if (ic != nullptr && !settings_.app_rules.empty()) {
                 const auto& prog = ic->program();
                 if (auto it = settings_.app_rules.find(prog); it != settings_.app_rules.end()) {
-                    if (auto m = nexkey::method_from_string(it->second)) {
+                    const auto rule = nexkey::parse_app_rule(it->second);
+                    if (auto m = nexkey::method_from_string(rule.method)) {
                         opts.method = *m;
                     }
                 }
@@ -421,71 +451,80 @@ private:
             state->engine.set_options(opts);
             state->engine.set_macros(settings_.macros);
             state->engine.set_custom_words(settings_.custom_dictionary);
+
+            // A rule change, a settings change or a learned fallback can switch
+            // the mode while a word is being typed. In direct mode the letters
+            // are already in the document, so carrying the word over to preedit
+            // (or the other way round) would leave it there twice.
+            const auto mode = delivery_decision(ic).mode;
+            if (state->mode != mode) {
+                state->mode = mode;
+                state->engine.discard();
+                state->direct.reset();
+            }
         }
         return *state;
     }
 
-    struct DirectDecision {
-        bool direct{true};
-        const char* reason{""};
-    };
-
-    /// Decide between direct typing and preedit for one input context.
-    DirectDecision direct_decision(fcitx::InputContext* ic) const
+    /// What this input context can do, as far as delivering text is concerned.
+    nexkey::ClientInfo client_info(fcitx::InputContext* ic) const
     {
-        if (!settings_.options.direct_typing) {
-            return {false, "Đã tắt gõ trực tiếp trong cài đặt"};
-        }
         if (ic == nullptr) {
-            return {true, "Mặc định"};
+            return nexkey::ClientInfo{};
         }
-        const std::string& program = ic->program();
-        if (auto it = settings_.app_rules.find(program); it != settings_.app_rules.end()) {
-            if (it->second == "preedit") {
-                if (!last_learned_.empty() && program == last_learned_) {
-                    return {false, "Tự học: xóa/thay chữ không hiệu lực ở ứng dụng này"};
-                }
-                return {false, "Quy tắc ứng dụng: preedit"};
-            }
-            if (it->second == "direct") {
-                return {true, "Quy tắc ứng dụng: direct"};
-            }
-        }
-        if (program == "gnome-text-editor") {
-            return {false, "Danh sách có sẵn (gnome-text-editor)"};
-        }
-        // Chromium / Electron based programs ignore deleteSurroundingText, so
-        // direct typing cannot replace or delete characters there.
-        // Program names are ASCII and the match must not follow the locale.
-        std::string lower = program;
-        for (char& c : lower) {
-            if (c >= 'A' && c <= 'Z') {
-                c = static_cast<char>(c - 'A' + 'a');
-            }
-        }
-        for (const char* needle : {"chrome", "chromium", "brave", "firefox", "electron",
-                                   "code", "discord", "slack", "obsidian"}) {
-            if (lower.find(needle) != std::string::npos) {
-                return {false, "Danh sách có sẵn (Chromium/Electron)"};
-            }
-        }
-        return {true, "Mặc định"};
+        const bool capability =
+            ic->capabilityFlags().test(fcitx::CapabilityFlag::SurroundingText);
+        const bool valid = capability && ic->surroundingText().isValid();
+        return nexkey::ClientInfo{ic->program(), capability, valid};
+    }
+
+    nexkey::Decision delivery_decision(fcitx::InputContext* ic) const
+    {
+        return policy_.decide(client_info(ic));
     }
 
     bool use_direct_typing(fcitx::InputContext* ic) const
     {
-        return direct_decision(ic).direct;
+        return delivery_decision(ic).mode == nexkey::DeliveryMode::Direct;
     }
 
-    /// Compare the document with what direct typing believes it wrote. Three
-    /// mismatches within a minute mean the application ignores deletions, so
-    /// it is switched to preedit for good.
-    void check_direct_health(fcitx::InputContext* ic, NexKeyState& state)
+    /// The sentence the diagnostics page shows for a decision.
+    std::string delivery_reason(fcitx::InputContext* ic, const nexkey::Decision& decision) const
+    {
+        const bool keys = decision.strategy == nexkey::DeleteStrategy::ForwardedKey;
+        switch (decision.source) {
+        case nexkey::DeliverySource::Setting:
+            return "Đã tắt gõ trực tiếp trong cài đặt";
+        case nexkey::DeliverySource::AppRule:
+            if (decision.mode == nexkey::DeliveryMode::Preedit) {
+                if (ic != nullptr && !last_learned_.empty() && ic->program() == last_learned_) {
+                    return "Tự học: ứng dụng bỏ qua lệnh xóa, đã chuyển sang preedit";
+                }
+                return "Quy tắc ứng dụng: preedit";
+            }
+            return keys ? "Quy tắc ứng dụng: gõ trực tiếp, xóa bằng BackSpace"
+                        : "Quy tắc ứng dụng: gõ trực tiếp";
+        case nexkey::DeliverySource::NoSurroundingText:
+            return "Ứng dụng không cho biết nội dung, xóa bằng BackSpace";
+        case nexkey::DeliverySource::Default:
+            break;
+        }
+        return decision.mode == nexkey::DeliveryMode::Preedit ? "Mặc định: preedit" : "Mặc định";
+    }
+
+    /// Check the last replacement against the document the client reports.
+    ///
+    /// Only a client that reports its text can be checked at all; for the
+    /// others the session keeps its mirror and nothing is learned. A
+    /// replacement the application verifiably dropped is repaired first, so the
+    /// word on the screen stays the word that was typed, and the second one
+    /// costs the application its direct typing.
+    void verify_direct(fcitx::InputContext* ic, NexKeyState& state)
     {
         const auto now = std::chrono::steady_clock::now();
         std::erase_if(state.mismatches, [now](const auto& when) { return now - when > 60s; });
 
-        if (state.committed_text.empty() || !use_direct_typing(ic)) {
+        if (ic == nullptr || !state.direct.has_pending() || !use_direct_typing(ic)) {
             return;
         }
         if (!ic->capabilityFlags().test(fcitx::CapabilityFlag::SurroundingText)) {
@@ -496,41 +535,83 @@ private:
             return;
         }
 
-        const std::string before = utf8_prefix_chars(surrounding.text(), surrounding.cursor());
-        const std::string& expected = state.committed_text;
-        if (before.size() >= expected.size() &&
-            before.compare(before.size() - expected.size(), expected.size(), expected) == 0) {
+        const auto verification =
+            state.direct.verify(utf8_prefix_chars(surrounding.text(), surrounding.cursor()));
+        if (!verification.has_value()) {
             return;
         }
 
-        // The document does not hold what was typed: the cursor may simply have
-        // moved, so only drop the composition and count the event.
-        state.mismatches.push_back(now);
-        commit_all(ic, state);
-        if (state.mismatches.size() >= 3) {
-            learn_preedit(ic, state);
+        switch (verification->outcome) {
+        case nexkey::EditOutcome::Landed:
+            state.dropped = 0;
+            return;
+        case nexkey::EditOutcome::Unverifiable:
+            return;
+        case nexkey::EditOutcome::Unrelated:
+            // The document is not the one this word was written into: the
+            // cursor moved, or another program typed there. Dropping the half
+            // typed word is better than writing on top of unknown text.
+            state.engine.discard();
+            state.direct.reset();
+            return;
+        case nexkey::EditOutcome::DeletionIgnored: {
+            const auto decision = delivery_decision(ic);
+            // The request that just failed cannot fix the word: if the client
+            // ignores deleteSurroundingText it ignores it for the repair too,
+            // and a forwarded BackSpace is what it does handle.
+            const auto repair_strategy = decision.strategy == nexkey::DeleteStrategy::SurroundingText
+                                             ? nexkey::DeleteStrategy::ForwardedKey
+                                             : decision.strategy;
+            apply_edit(ic, verification->repair, repair_strategy);
+            state.mismatches.push_back(now);
+            ++state.dropped;
+            if (state.dropped >= 2) {
+                learn_delivery_failure(ic, state, decision);
+            }
+            return;
+        }
         }
     }
 
-    /// Remember that direct typing does not work in this application.
-    void learn_preedit(fcitx::InputContext* ic, NexKeyState& state)
+    /// Write the next rung of the delivery ladder into [app_rules], so the next
+    /// session starts where this one ended up.
+    void learn_delivery_failure(fcitx::InputContext* ic, NexKeyState& state,
+                                const nexkey::Decision& decision)
     {
         const std::string program = ic->program();
-        if (program.empty()) {
+        const std::string_view rule = nexkey::DeliveryPolicy::fallback_rule(decision);
+        if (program.empty() || rule.empty()) {
             return;
         }
-        // Still in direct mode here, so this drops the state without committing.
-        commit_all(ic, state);
 
-        settings_.app_rules[program] = "preedit";
+        if (rule == "preedit") {
+            // The word is already in the document. Dropping the composition is
+            // what keeps preedit mode from typing it a second time.
+            state.engine.discard();
+            state.direct.reset();
+            auto& panel = ic->inputPanel();
+            panel.setClientPreedit(fcitx::Text{});
+            panel.setCandidateList(nullptr);
+            ic->updatePreedit();
+        }
+
+        state.dropped = 0;
+        // Keep the input method the user may have chosen for this program and
+        // replace only the delivery half of the rule.
+        const auto existing = nexkey::parse_app_rule(
+            [&] {
+                const auto found = settings_.app_rules.find(program);
+                return found == settings_.app_rules.end() ? std::string{} : found->second;
+            }());
+        settings_.app_rules[program] = nexkey::with_delivery(existing, rule);
+        policy_.set_app_rules(settings_.app_rules);
         ++generation_;
         last_learned_ = program;
         last_learned_at_ = static_cast<std::int64_t>(std::time(nullptr));
-        state.mismatches.clear();
         if (!nexkey::save_settings(settings_)) {
-            FCITX_WARN() << "NexKey: could not save the learned rule for " << program;
+            FCITX_WARN() << "NexKey: could not save the delivery rule for " << program;
         }
-        FCITX_INFO() << "NexKey: switched " << program << " to preedit mode";
+        FCITX_INFO() << "NexKey: " << program << " now uses " << rule;
         publish_status(ic, state);
     }
 
@@ -546,14 +627,16 @@ private:
             return;
         }
 
-        const auto decision = direct_decision(ic);
+        const auto decision = delivery_decision(ic);
+        const std::string reason = delivery_reason(ic, decision);
         const bool capability =
             ic->capabilityFlags().test(fcitx::CapabilityFlag::SurroundingText);
         const bool valid = capability && ic->surroundingText().isValid();
         const int recent = static_cast<int>(state.mismatches.size());
 
-        const std::string key = program + '|' + (decision.direct ? 'd' : 'p') + '|' +
-                                decision.reason + '|' + (capability ? '1' : '0') +
+        const std::string key = program + '|' +
+                                (decision.mode == nexkey::DeliveryMode::Direct ? 'd' : 'p') +
+                                '|' + reason + '|' + (capability ? '1' : '0') +
                                 (valid ? '1' : '0') + std::to_string(recent) + last_learned_;
         const auto now = std::chrono::steady_clock::now();
         if (key == last_status_key_ && now - last_status_write_ < 5s) {
@@ -564,8 +647,8 @@ private:
 
         nexkey::RuntimeStatus status;
         status.program = program;
-        status.mode = decision.direct ? "direct" : "preedit";
-        status.reason = decision.reason;
+        status.mode = decision.mode == nexkey::DeliveryMode::Direct ? "direct" : "preedit";
+        status.reason = reason;
         status.surrounding_capability = capability;
         status.surrounding_valid = valid;
         status.recent_mismatches = recent;
@@ -582,7 +665,7 @@ private:
     {
         if (use_direct_typing(ic)) {
             state.engine.discard();
-            state.committed_text.clear();
+            state.direct.reset();
             auto& panel = ic->inputPanel();
             panel.setClientPreedit(fcitx::Text{});
             panel.setCandidateList(nullptr);
@@ -596,30 +679,29 @@ private:
         }
     }
 
+    /// Commit `text` and end the composition.
+    ///
+    /// In direct mode the word is already in the document, so the text replaces
+    /// it: the highlight of the word selection window may name a different
+    /// reading of the same keystrokes, and committing it on top of the old text
+    /// would leave both.
+    void commit_text(fcitx::InputContext* ic, NexKeyState& state, std::string_view text)
+    {
+        if (use_direct_typing(ic)) {
+            const auto decision = delivery_decision(ic);
+            apply_edit(ic, state.direct.replace(text), decision.strategy);
+            state.direct.reset();
+        } else if (!text.empty()) {
+            ic->commitString(std::string(text));
+        }
+        state.engine.discard();
+        update_preedit(ic, state);
+    }
+
     /// Commit the text of one candidate and end the composition.
     void commit_candidate(fcitx::InputContext* ic, NexKeyState& state, const std::string& text)
     {
-        if (use_direct_typing(ic)) {
-            const auto prefix = nexkey::unicode::common_prefix(state.committed_text, text);
-            const std::size_t old_total_chars = utf8_char_count(state.committed_text);
-            const std::size_t chars_to_delete = old_total_chars - prefix.code_points;
-            if (chars_to_delete > 0) {
-                delete_characters(ic, chars_to_delete);
-            }
-            state.engine.discard();
-            state.committed_text.clear();
-            if (prefix.bytes < text.size()) {
-                const std::string suffix = text.substr(prefix.bytes);
-                ic->commitString(suffix);
-            }
-            update_preedit(ic, state);
-        } else {
-            state.engine.discard();
-            if (!text.empty()) {
-                ic->commitString(text);
-            }
-            update_preedit(ic, state);
-        }
+        commit_text(ic, state, text);
     }
 
     void update_preedit(fcitx::InputContext* ic, NexKeyState& state)
@@ -628,19 +710,10 @@ private:
             return;
         }
         if (use_direct_typing(ic)) {
-            const std::string new_preedit(state.engine.preedit());
-            if (new_preedit != state.committed_text) {
-                const auto prefix = nexkey::unicode::common_prefix(state.committed_text, new_preedit);
-                const std::size_t old_total_chars = utf8_char_count(state.committed_text);
-                const std::size_t chars_to_delete = old_total_chars - prefix.code_points;
-                if (chars_to_delete > 0) {
-                    delete_characters(ic, chars_to_delete);
-                }
-                if (prefix.bytes < new_preedit.size()) {
-                    const std::string suffix = new_preedit.substr(prefix.bytes);
-                    ic->commitString(suffix);
-                }
-                state.committed_text = new_preedit;
+            const std::string next(state.engine.preedit());
+            if (next != state.direct.text()) {
+                const auto decision = delivery_decision(ic);
+                apply_edit(ic, state.direct.replace(next), decision.strategy);
             }
             auto& panel = ic->inputPanel();
             panel.setClientPreedit(fcitx::Text{});
@@ -780,12 +853,16 @@ private:
             } else {
                 text = state.engine.preedit();
             }
-            state.engine.discard();
-            if (!text.empty()) {
-                text.push_back(' ');
-                ic->commitString(text);
+            if (text.empty()) {
+                // Nothing to choose from, but the space itself still belongs to
+                // the user.
+                state.engine.discard();
+                ic->commitString(" ");
+                update_preedit(ic, state);
+                return true;
             }
-            update_preedit(ic, state);
+            text.push_back(' ');
+            commit_text(ic, state, text);
             return true;
         }
         return false;
@@ -865,6 +942,8 @@ private:
         }
 
         settings_ = nexkey::load_settings(path);
+        policy_.set_direct_typing(settings_.options.direct_typing);
+        policy_.set_app_rules(settings_.app_rules);
         // A reloaded configuration has to reach the input contexts that are
         // already open, so the generation counter is bumped here as well.
         ++generation_;
@@ -873,6 +952,8 @@ private:
 
     fcitx::Instance* instance_;
     nexkey::Settings settings_;
+    /// Which application gets which path, learned rules included.
+    nexkey::DeliveryPolicy policy_;
     ToggleKey toggle_;
     fcitx::FactoryFor<NexKeyState> state_factory_;
     unsigned generation_{0};

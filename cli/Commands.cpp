@@ -4,6 +4,7 @@
 #include "Cli.hpp"
 
 #include "nexkey/Converter.hpp"
+#include "nexkey/Delivery.hpp"
 #include "nexkey/Engine.hpp"
 #include "nexkey/Settings.hpp"
 #include "nexkey/Types.hpp"
@@ -57,12 +58,46 @@ void print_settings(std::ostream& out, const Settings& settings)
         << "direct_typing=" << bool_text(settings.options.direct_typing) << '\n'
         << "toggle_key=" << settings.toggle_key << '\n'
         << "show_tray_icon=" << bool_text(settings.show_tray_icon) << '\n'
-        << "start_with_system=" << bool_text(settings.start_with_system) << '\n'
-        << "config=" << default_config_path().string() << '\n';
+        << "start_with_system=" << bool_text(settings.start_with_system) << '\n';
+    if (!settings.app_rules.empty()) {
+        std::vector<std::string> programs;
+        programs.reserve(settings.app_rules.size());
+        for (const auto& [program, rule] : settings.app_rules) {
+            static_cast<void>(rule);
+            programs.push_back(program);
+        }
+        std::ranges::sort(programs);
+        for (const auto& program : programs) {
+            out << "app_rules." << program << '=' << settings.app_rules.at(program) << '\n';
+        }
+    }
+    out << "config=" << default_config_path().string() << '\n';
+}
+
+/// The program part of an "app_rules.<program>" key, lower cased, or empty.
+std::string app_rule_program(std::string_view key)
+{
+    constexpr std::string_view prefix{"app_rules."};
+    if (!key.starts_with(prefix)) {
+        return {};
+    }
+    std::string program(key.substr(prefix.size()));
+    for (char& character : program) {
+        if (character >= 'A' && character <= 'Z') {
+            character = static_cast<char>(character - 'A' + 'a');
+        }
+    }
+    return program;
 }
 
 std::optional<std::string> config_value(const Settings& settings, std::string_view key)
 {
+    if (const auto program = app_rule_program(key); !program.empty()) {
+        if (const auto found = settings.app_rules.find(program); found != settings.app_rules.end()) {
+            return found->second;
+        }
+        return std::nullopt;
+    }
     if (key == "input.method") {
         return std::string(to_string(settings.options.method));
     }
@@ -129,6 +164,21 @@ bool parse_bool_value(std::string_view text, bool& out)
 
 bool apply_config(Settings& settings, std::string_view key, std::string_view value)
 {
+    if (const auto program = app_rule_program(key); !program.empty()) {
+        // An empty value drops the rule, which is how a program gets the
+        // default path back after NexKey learned a slower one for it.
+        if (value.empty() || value == "auto" || value == "default") {
+            settings.app_rules.erase(program);
+            return true;
+        }
+        // The rule may name an input method, a delivery mode or both, so the
+        // same parser the addon uses decides whether the value is usable.
+        if (!nexkey::parse_app_rule(value).valid) {
+            return false;
+        }
+        settings.app_rules[program] = std::string(value);
+        return true;
+    }
     if (key == "input.method" || key == "method") {
         const auto method = method_from_string(value);
         if (!method) {
@@ -386,7 +436,11 @@ int run_config(const Args& args)
             std::cerr << "nexkey: cannot write " << default_config_path().string() << '\n';
             return 1;
         }
-        std::cout << positional[1] << '=' << *config_value(settings, positional[1]) << '\n';
+        std::cout << positional[1] << '=';
+        if (const auto updated = config_value(settings, positional[1]); updated.has_value()) {
+            std::cout << *updated;
+        }
+        std::cout << '\n';
         return 0;
     }
 

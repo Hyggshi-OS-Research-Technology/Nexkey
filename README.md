@@ -34,9 +34,10 @@ with CMake.
 ## Features
 
 - **100% Native Direct Typing (Non-preedit)**: Eliminates annoying underlines while typing. Characters appear directly and immediately in the document (VS Code, Chrome, terminals, LibreOffice), avoiding input latency and visual clutter.
+- **Works in every application, without a list of names**: when an application drops a replacement, NexKey repairs the word on screen, then moves that program one step down a ladder — `deleteSurroundingText`, then forwarded `BackSpace` keys, then the underlined preedit — and remembers the choice in `[app_rules]`. Nothing is hard coded to a browser or an editor.
 - **Ultra High Performance**: Leverages instant SurroundingText & key forwarding optimized for high-speed Linux applications across X11 & Wayland.
 - **System Tray Quick Settings**: Right-click the NexKey tray icon for instant toggles: output charset, spell check, macros, capitalized macro, non-Vietnamese auto-restore, custom dictionary, and the smart emoji picker.
-- **Per-Application Rules (App Rules)**: Assign dedicated input modes per application or window (e.g. `code` → `telex`, `gnome-terminal` → `off`, `firefox` → `vni`).
+- **Per-Application Rules (App Rules)**: Assign dedicated input modes per application or window (e.g. `code` → `telex`, `gnome-terminal` → `off`, `firefox` → `vni`, `chrome` → `preedit`), from the tray window or with `nexkey config set app_rules.chrome preedit`.
 - **Backup & Restore**: Export and import complete configurations via JSON files with selective component filtering: Main Settings, Macros, Custom Keymaps, App Rules, and Custom Dictionary.
 - **Dynamic `$TIME` / `$DATE` Macros**: Macro expansions support dynamic placeholders `$TIME` and `$DATE` (e.g. `kg` → `khô gà $TIME`), customizable via `Time Format` and `Date Format`.
 - **Keyboard Presets**: Built-in support for popular layouts: Telex, Simple Telex, VNI, VIQR, and Microsoft layout with one-click preset switching.

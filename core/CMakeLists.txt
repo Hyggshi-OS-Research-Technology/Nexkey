@@ -1,5 +1,6 @@
 add_library(nexkey-core STATIC
     src/Converter.cpp
+    src/Delivery.cpp
     src/Engine.cpp
     src/Grapheme.cpp
     src/Settings.cpp

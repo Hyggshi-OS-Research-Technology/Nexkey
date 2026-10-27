@@ -234,8 +234,12 @@ SettingsDialog::SettingsDialog(const nexkey::Settings& settings, QWidget* parent
     auto* appPage = new QWidget(this);
     auto* appLayout = new QVBoxLayout(appPage);
     prepare_page_layout(appLayout);
-    auto* appDesc = new QLabel(tr("Gán chế độ gõ riêng cho từng ứng dụng. Chế độ \"preedit\" dùng gạch chân (ổn định "
-                                   "cho Chrome/Electron), \"direct\" gõ trực tiếp, \"off\" tắt bộ gõ:"), appPage);
+    auto* appDesc = new QLabel(tr("Gán chế độ gõ riêng cho từng ứng dụng. \"direct\" gõ trực tiếp, \"direct-keys\" "
+                                   "cũng gõ trực tiếp nhưng xóa bằng phím BackSpace (dùng khi ứng dụng bỏ qua lệnh "
+                                   "xóa), \"preedit\" hiện gạch chân, \"off\" tắt bộ gõ. Ghép kiểu gõ và cách giao chữ "
+                                   "bằng dấu + (ví dụ telex+preedit). NexKey tự chuyển xuống bước thấp hơn khi "
+                                   "phát hiện ứng dụng làm mất chữ."),
+                              appPage);
     appDesc->setWordWrap(true);
     appLayout->addWidget(appDesc);
 
@@ -707,9 +711,13 @@ void SettingsDialog::addAppRule()
         QLineEdit::Normal, QString{}, &ok);
     if (!ok || app.trimmed().isEmpty()) return;
 
+    // "direct-keys" is the middle rung of the delivery ladder: type straight
+    // into the document, but delete with forwarded BackSpace keys instead of
+    // deleteSurroundingText, which some toolkits ignore.
     QStringList modes = {QStringLiteral("telex"), QStringLiteral("vni"),
                          QStringLiteral("viqr"), QStringLiteral("microsoft"),
                          QStringLiteral("preedit"), QStringLiteral("direct"),
+                         QStringLiteral("direct-keys"),
                          QStringLiteral("off (English)")};
     const QString mode = QInputDialog::getItem(
         this, tr("Chọn chế độ"),

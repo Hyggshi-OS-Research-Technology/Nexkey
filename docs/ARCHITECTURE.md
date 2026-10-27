@@ -22,6 +22,7 @@ nexkey-tests       tests/
 | `nexkey/Converter.hpp` | Conversion between Unicode, NFD, TCVN3 and VIQR |
 | `nexkey/Settings.hpp` | INI configuration reader and writer |
 | `nexkey/Unicode.hpp` | Strict UTF-8, code point and grapheme cluster measuring |
+| `nexkey/Delivery.hpp` | Direct typing policy, edit planning and document verification |
 
 Internal translation units:
 
@@ -30,6 +31,7 @@ Internal translation units:
 | `core/src/Word.cpp` | Keystroke parsing per input method, word composition |
 | `core/src/Syllable.cpp` | Onset, nucleus and coda tables, tone position, plausibility |
 | `core/src/Grapheme.cpp` | Composed code point table and reverse lookup |
+| `core/src/Delivery.cpp` | Delivery ladder, `plan_edit` and `DirectSession` |
 
 ### Text measurement
 
@@ -181,6 +183,59 @@ The addon watches the modification time of the configuration file and reloads
 it lazily, at most four times per second, so changes made by the tray
 application apply without restarting Fcitx5.
 
+#### Direct typing and the delivery ladder
+
+Direct typing types straight into the document, so every keystroke that changes
+an earlier letter is a replacement: delete the characters from the shared prefix
+on, then type the new ones. `nexkey::plan_edit` computes that pair and
+`nexkey::DirectSession` remembers what the document should look like. Both live
+in `core/src/Delivery.cpp` and are covered by tests, because the same two
+questions come up in every frontend: what do I delete, and did it work?
+
+What the application does with the request is the interesting part. Some
+toolkits accept `deleteSurroundingText` and ignore it, and a client that does not
+report its text cannot be checked at all. NexKey answers with a ladder, decided
+per application by `nexkey::DeliveryPolicy`:
+
+| Rung | Deletion | Used when |
+| --- | --- | --- |
+| `direct` | `deleteSurroundingText`, counted in characters | the client reports its text |
+| `direct-keys` | one forwarded `BackSpace` per character | the client reports no text, or dropped a deletion |
+| `preedit` | none, the word is committed once when it ends | the client dropped both |
+
+Nothing in that table is a list of program names. A rung is left behind on
+evidence: after each keystroke the addon compares the end of the document, as
+the client reports it, with what the edit asked for (`DirectSession::verify`).
+
+- **Landed**: the document ends with the new text, nothing happens.
+- **Deletion ignored**: the old characters are still there and the new ones
+  follow them. The addon first repairs the word, deleting with forwarded
+  `BackSpace` keys, because the request that just failed cannot fix anything, so
+  the user keeps what they typed. Then it counts the failure: two in a row write
+  the next rung into `[app_rules]` and save the configuration, so the next
+  session starts one step down.
+- **Not reported yet**: the client still shows the text from before the edit.
+  Doing nothing is the only safe answer, because deleting again would take a
+  second character with it.
+- **Unrelated**: the document is not the one this word was written into, which
+  means the cursor moved or another program typed there. The half typed word is
+  dropped instead of writing on top of unknown text.
+
+The check runs at the start of every keystroke, against the document as the
+client reports it with that key, so every edit is checked except the one that
+ends the word. A pure deletion leaves nothing to look for and is skipped the
+same way: the edit that follows it types a character, and that one can be
+checked.
+
+A rung change, a settings change or a mode switch while a word is being typed is
+handled in one place: the state remembers the mode it was used with, and a
+different one drops the composition instead of carrying the word from the
+document into the preedit or the other way round.
+
+The IBus engine has no direct path at all. It publishes the preedit and commits
+the word once, which is the last rung and the one that works everywhere; the
+`direct_typing` option therefore only affects the Fcitx5 addon.
+
 ### Tray application
 
 `gui/Daemon.cpp` owns the configuration and exposes it on the session bus.
@@ -210,7 +265,10 @@ word itself), Backspace walks those states in reverse (the raw keystrokes are
 kept, so undo is exact), and every commit is well formed UTF-8 in both Unicode
 forms. `tests/test_unicode.cpp` adds property tests for the byte level helpers,
 and the decoder agrees with the reference implementation of the Unicode
-standard on a few thousand malformed byte strings.
+standard on a few thousand malformed byte strings. `tests/test_delivery.cpp`
+covers the delivery ladder and the direct typing edits: what a replacement
+deletes, what a client that ignored it looks like, and which rule NexKey learns
+from that.
 
 ## Charsets
 

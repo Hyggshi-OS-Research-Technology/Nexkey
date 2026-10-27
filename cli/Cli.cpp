@@ -88,7 +88,8 @@ void print_help(std::ostream& out)
         << "  nexkey test --tone-style traditional \"hoaf\"\n"
         << "  nexkey test --candidates \"hoaf\"\n"
         << "  nexkey convert --from tcvn3 --to unicode < input.txt\n"
-        << "  nexkey config set input.method vni\n";
+        << "  nexkey config set input.method vni\n"
+        << "  nexkey config set app_rules.chrome preedit\n";
 }
 
 OptionParser::OptionParser(const Args& args,

@@ -28,7 +28,17 @@ files were actually installed under.
 
 The engine is a thin wrapper: everything about Vietnamese text lives in
 `nexkey-core` and is covered by the unit tests, so the Fcitx5 addon and the
-IBus engine behave identically.
+IBus engine produce the same text.
+
+The one deliberate difference is how the text reaches the application. The
+Fcitx5 addon types straight into the document and steps down when an
+application drops a replacement (see
+[docs/ARCHITECTURE.md](ARCHITECTURE.md#direct-typing-and-the-delivery-ladder)),
+while the IBus engine always uses the preedit and commits each word once. That
+is the most compatible path there is, because nothing is ever deleted, so
+`engine.direct_typing` has no effect here. An application that shows the
+underline badly in IBus gets the same behaviour in Fcitx5 when its rule is
+`preedit`.
 
 ## Install
 

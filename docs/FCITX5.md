@@ -126,6 +126,41 @@ the same core library as the addon, so the two never disagree.
 The candidate window only appears while a word has more than one reading;
 `nexkey config set engine.candidates false` turns it off.
 
+### Typing in many applications
+
+NexKey types straight into the document, which is what makes it feel like a
+keyboard, and the replacement of an earlier letter is the part applications
+disagree about. Instead of a list of program names, the addon watches what each
+application actually does with a replacement and steps down a ladder:
+
+1. `direct`: type into the document, delete through `deleteSurroundingText`.
+2. `direct-keys`: type into the document, delete by forwarding `BackSpace`.
+   This is the path for browsers, Electron applications and anything else that
+   accepts the delete request and ignores it.
+3. `preedit`: show the word with an underline and commit it once, like most
+   Linux input methods. Nothing is ever deleted, so every application can do it.
+
+When the second replacement in a row is dropped, NexKey repairs the word on
+screen (so the text stays what was typed), writes the next step into
+`[app_rules]` and saves the configuration; the next session starts one rung
+lower. The reason is shown in the tray diagnostics, together with the number of
+recent mismatches:
+
+```bash
+cat ~/.cache/nexkey/status.conf
+```
+
+To force a path yourself, add a rule and restart nothing:
+
+```bash
+nexkey config set app_rules.chrome preedit
+nexkey config set app_rules.gnome-text-editor direct-keys
+nexkey config set app_rules.code telex+direct-keys   # method and path together
+nexkey config set app_rules.chrome auto              # forget the rule
+```
+
+Deleting the line makes NexKey try the faster path again.
+
 ## Configure
 
 NexKey keeps its own configuration, shared with the IBus engine, the tray
@@ -157,6 +192,8 @@ restart. [docs/CONFIGURATION.md](CONFIGURATION.md) lists every key.
 | The addon appears in `fcitx5-diagnose` but typing does nothing | NexKey is in EN mode: the panel icon is `EN`, press the toggle key |
 | The toggle key does nothing | it collides with the Fcitx5 trigger or a desktop shortcut; pick another combination with `nexkey config set ui.toggle_key` |
 | Vietnamese text appears twice | IBus and Fcitx5 are both running; use one of them (see [docs/IBUS.md](IBUS.md)) |
+| A word loses a letter in one application only | the application ignores `deleteSurroundingText`; NexKey repairs the word and switches that program to `direct-keys` after the second occurrence. Add `nexkey config set app_rules.<program> preedit` to go straight to the underlined path |
+| The underscore appears in a terminal or a chat window | that application has no client preedit, so the word is drawn in the input method panel; the text itself is correct. `nexkey config set engine.direct_typing false` makes it the same everywhere |
 | No input at all in GTK or Qt applications | install the matching `fcitx5-frontend-*` package; under X11 the environment normally needs `GTK_IM_MODULE=fcitx`, `QT_IM_MODULE=fcitx` and `XMODIFIERS=@im=fcitx` |
 | No candidate window on GNOME Wayland | GNOME has no built-in panel for Fcitx5; install the *kimpanel* GNOME extension, or use the classic user interface |
 | Wrong characters in old documents | the output charset is not what the document expects: `nexkey config set output.encoding tcvn3` or convert with `nexkey convert` |
