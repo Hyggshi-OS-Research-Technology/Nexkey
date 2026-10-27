@@ -153,9 +153,9 @@ TEST(telex_english_words_that_need_the_dictionary)
 {
     // The words below *can* be read as Vietnamese syllables, so the structural
     // check accepts them and the tone key is swallowed: typing "test" produces
-    // "tét" instead of "test". Only a dictionary can tell the two apart, and
-    // the spell_check / custom_dictionary options are parsed and stored but not
-    // consulted by the engine yet (see docs/ARCHITECTURE.md, "English text").
+    // "tét" instead of "test". Only a dictionary can tell the two apart, which
+    // is what the [custom_dictionary] section is for; the spell_check option
+    // that would use a built-in one is still reserved.
     //
     // The expectations record today's behaviour on purpose: whoever wires the
     // dictionary in has to update this test instead of silently changing what
