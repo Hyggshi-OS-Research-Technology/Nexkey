@@ -38,6 +38,22 @@ struct Registrar {
     }
 };
 
+inline std::string describe_utf32(std::u32string_view value)
+{
+    std::ostringstream stream;
+    stream << '\'';
+    for (const char32_t code_point : value) {
+        if (code_point >= 0x20 && code_point < 0x7FU) {
+            stream << static_cast<char>(code_point);
+        } else {
+            stream << "U+" << std::hex << std::uppercase
+                   << static_cast<unsigned long>(code_point) << std::dec << ' ';
+        }
+    }
+    stream << '\'';
+    return stream.str();
+}
+
 inline std::string describe_string(std::string_view value)
 {
     std::ostringstream stream;
@@ -88,6 +104,12 @@ std::string describe(const std::optional<T>& value)
     return value.has_value() ? "some(" + describe(*value) + ")" : std::string("none");
 }
 
+/// Code point strings read as text with the escapes spelled out.
+inline std::string describe(const std::u32string& value)
+{
+    return describe_utf32(value);
+}
+
 inline void fail(const std::source_location& location, const std::string& message)
 {
     ++failures();
@@ -117,10 +139,13 @@ inline void fail(const std::source_location& location, const std::string& messag
         }                                                                      \
     } while (false)
 
+// The two operands are copied into locals on purpose: `const auto&` would bind
+// a temporary such as `decode(text)` only until the end of its own declaration
+// statement and leave a dangling reference behind.
 #define EXPECT_EQ(actual, expected)                                            \
     do {                                                                       \
-        const auto& actual_value = (actual);                                    \
-        const auto& expected_value = (expected);                                \
+        const auto actual_value = (actual);                                    \
+        const auto expected_value = (expected);                                \
         if (!(actual_value == expected_value)) {                                \
             ::testing::fail(std::source_location::current(),                    \
                             #actual " == " #expected "\n  actual:   " +         \

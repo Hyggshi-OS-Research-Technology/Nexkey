@@ -21,7 +21,7 @@ nexkey-tests       tests/
 | `nexkey/Engine.hpp` | Keystroke state machine (`type`, `backspace`, `flush`) |
 | `nexkey/Converter.hpp` | Conversion between Unicode, NFD, TCVN3 and VIQR |
 | `nexkey/Settings.hpp` | INI configuration reader and writer |
-| `nexkey/Unicode.hpp` | UTF-8 and UTF-32 helpers |
+| `nexkey/Unicode.hpp` | Strict UTF-8, code point and grapheme cluster measuring |
 
 Internal translation units:
 
@@ -30,6 +30,34 @@ Internal translation units:
 | `core/src/Word.cpp` | Keystroke parsing per input method, word composition |
 | `core/src/Syllable.cpp` | Onset, nucleus and coda tables, tone position, plausibility |
 | `core/src/Grapheme.cpp` | Composed code point table and reverse lookup |
+
+### Text measurement
+
+`nexkey/Unicode.hpp` is the only place where NexKey interprets bytes as text,
+and it follows the well formedness rules of the Unicode Standard instead of the
+"first byte tells the length" shortcut. Overlong forms, UTF-16 surrogates and
+code points above U+10FFFF are not text: `decode` replaces each maximal subpart
+with one U+FFFD and `append` never writes a byte sequence a strict decoder would
+reject. The frontends rely on this, because they compare the document with what
+they wrote and a lenient decoder would hide corruption instead of showing it.
+
+The measuring helpers sit on top of the decoder, and they are what the direct
+typing path of the frontends needs:
+
+| Helper | Answer |
+| --- | --- |
+| `count_code_points` | code points, the unit the surrounding text protocol counts |
+| `common_prefix` | bytes, code points and clusters shared by two strings |
+| `count_graphemes`, `grapheme_boundary` | visible characters, marks included |
+
+`common_prefix` gives the cut between the part of a word a frontend has to
+delete and the part it commits, and it never lands inside a code point.
+`grapheme_boundary` makes sure that deleting a letter of an NFD word takes its
+combining marks with it instead of leaving a floating accent behind.
+
+A cluster is a base code point plus the combining marks, variation selectors
+and emoji modifiers that follow it. The rules that need full Unicode tables
+(CR LF, the emoji ZWJ sequences) are treated as separate characters.
 
 ### From keystrokes to text
 
