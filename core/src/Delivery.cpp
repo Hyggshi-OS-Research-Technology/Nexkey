@@ -197,6 +197,23 @@ void DirectSession::adopt(std::string_view text)
     m_pending.reset();
 }
 
+namespace {
+
+/// True when `text` ends with `tail`.
+///
+/// The document the frontend reports is the whole text before the cursor, while
+/// the session mirrors only the word that is being typed. Every comparison in
+/// verify() is therefore a comparison of the *end* of the report: comparing the
+/// whole report with the word would find a difference in every document that
+/// already contains something, and a session that concludes "this is not my
+/// document" on every keystroke drops the word it is typing.
+bool ends_with(std::string_view text, std::string_view tail) noexcept
+{
+    return text.size() >= tail.size() && text.substr(text.size() - tail.size()) == tail;
+}
+
+} // namespace
+
 std::optional<DirectSession::Verification> DirectSession::verify(std::string_view document_tail)
 {
     if (!m_pending.has_value()) {
@@ -204,7 +221,10 @@ std::optional<DirectSession::Verification> DirectSession::verify(std::string_vie
     }
 
     const Pending pending = *m_pending;
-    if (document_tail == pending.after) {
+
+    // Checked first: the new text is the strongest evidence that the edit
+    // landed, and it is also what a session that only ever appends has to see.
+    if (ends_with(document_tail, pending.after)) {
         m_pending.reset();
         return Verification{EditOutcome::Landed, Edit{}};
     }
@@ -212,7 +232,7 @@ std::optional<DirectSession::Verification> DirectSession::verify(std::string_vie
     // A report that still shows the text from before the edit means the client
     // has not processed it yet; deciding now would delete a second character
     // when the first deletion simply had not arrived.
-    if (document_tail == pending.before) {
+    if (ends_with(document_tail, pending.before)) {
         return Verification{EditOutcome::Unverifiable, Edit{}};
     }
 
@@ -224,7 +244,7 @@ std::optional<DirectSession::Verification> DirectSession::verify(std::string_vie
 
     std::string ignored = pending.before;
     ignored += pending.edit.commit;
-    if (document_tail == ignored) {
+    if (ends_with(document_tail, ignored)) {
         const Edit repair = plan_edit(ignored, pending.after);
         m_pending = Pending{std::move(ignored), pending.after, repair};
         return Verification{EditOutcome::DeletionIgnored, repair};

@@ -224,13 +224,22 @@ tested; `nexkey-uinput`, the helper that owns `/dev/uinput`, is a separate
 process with a protocol that can only ask for `BACKSPACE`. [UINPUT.md](UINPUT.md)
 has the details, including what the design cannot promise.
 
+The comparison is a comparison of **suffixes**. The client reports the whole text
+before the cursor, and the session mirrors only the word it is typing, so
+`DirectSession::verify` asks whether the report *ends with* what the edit asked
+for. Comparing the report with the word as a whole finds a difference in every
+document that already contains text, and a session that concludes "this is not
+my document" on every keystroke drops the word it is typing; `tests/test_typing.cpp`
+types into a document that already has text for exactly that reason.
+
 - **Landed**: the document ends with the new text, nothing happens.
 - **Deletion ignored**: the old characters are still there and the new ones
   follow them. The addon first repairs the word, deleting with forwarded
   `BackSpace` keys, because the request that just failed cannot fix anything, so
-  the user keeps what they typed. Then it counts the failure: two in a row write
-  the next rung into `[app_rules]` and save the configuration, so the next
-  session starts one step down.
+  the user keeps what they typed. The rest of that word is then deleted with
+  forwarded keys as well, so one bad client cannot cost a second letter. Then it
+  counts the failure: two in a row write the next rung into `[app_rules]` and
+  save the configuration, so the next session starts one step down.
 - **Not reported yet**: the client still shows the text from before the edit.
   Doing nothing is the only safe answer, because deleting again would take a
   second character with it.
@@ -239,10 +248,11 @@ has the details, including what the design cannot promise.
   dropped instead of writing on top of unknown text.
 
 The check runs at the start of every keystroke, against the document as the
-client reports it with that key, so every edit is checked except the one that
-ends the word. A pure deletion leaves nothing to look for and is skipped the
-same way: the edit that follows it types a character, and that one can be
-checked.
+client reports it with that key, and once more when the word is committed
+(`commit_all`, `commit_text`), so the edit of the last keystroke is checked
+before the mirror forgets it. A pure deletion leaves nothing to look for and is
+skipped the same way: the edit that follows it types a character, and that one
+can be checked.
 
 A rung change, a settings change or a mode switch while a word is being typed is
 handled in one place: the state remembers the mode it was used with, and a
@@ -286,6 +296,16 @@ standard on a few thousand malformed byte strings. `tests/test_delivery.cpp`
 covers the delivery ladder and the direct typing edits: what a replacement
 deletes, what a client that ignored it looks like, and which rule NexKey learns
 from that.
+
+`tests/test_typing.cpp` goes one level up. `tests/ClientSim.hpp` puts a document
+behind the core: a `Client` that applies the edits it is given and reports its
+text the way a frontend does, and an `InputMethod` that performs the same steps
+`NexKeyEngine::keyEvent` performs for one keystroke. The cases type the words of
+the bug reports into a document that already has text, with a client that is
+honest, one that ignores deletions, one whose report is a round trip late and one
+that reports nothing. That is how a mistake in the *order* of the edit, the check
+and the mirror shows up as a wrong document, which no test of the engine alone
+can see: the addon needs Fcitx5 to build, the sequence does not.
 
 ## Charsets
 

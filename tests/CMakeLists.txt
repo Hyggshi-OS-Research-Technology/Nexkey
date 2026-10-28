@@ -4,6 +4,7 @@ add_executable(nexkey-tests
     test_candidates.cpp
     test_delivery.cpp
     test_replacement.cpp
+    test_typing.cpp
     test_uinput.cpp
     test_engine.cpp
     test_settings.cpp

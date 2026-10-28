@@ -154,6 +154,11 @@ public:
     /// Text that is ready to be committed, held for the length of one key event
     /// so that the pieces of a replacement leave as a single commit.
     nexkey::CommitBatcher commits;
+    /// The client verifiably ignored a deletion, so the rest of this word is
+    /// deleted with forwarded BackSpace keys. Reset when the word ends: one bad
+    /// client is not a reason to slow every word down forever, and a client
+    /// that keeps failing gets a rule in [app_rules] instead.
+    bool prefer_keys{false};
 };
 
 /// The text helpers live in the core library so that the direct typing path and
@@ -166,9 +171,12 @@ inline std::size_t utf8_char_count(std::string_view text) noexcept
 }
 
 /// The first `chars` characters of a UTF-8 string, cut on a character boundary.
-inline std::string utf8_prefix_chars(std::string_view text, std::size_t chars)
+///
+/// A view, not a copy: the client can report a whole document, and this runs on
+/// every keystroke.
+inline std::string_view utf8_prefix(std::string_view text, std::size_t chars)
 {
-    return std::string(text.substr(0, nexkey::unicode::prefix_length(text, chars)));
+    return text.substr(0, nexkey::unicode::prefix_length(text, chars));
 }
 
 /// Milliseconds on the clock the addon's event loop runs on, so that the burst
@@ -513,6 +521,7 @@ private:
                 // way; only the text of the word is dropped, because the mode
                 // that would type it is gone.
                 state->burst.abandon();
+                state->prefer_keys = false;
                 state->engine.discard();
                 state->direct.reset();
             }
@@ -647,7 +656,13 @@ private:
             return;
         }
 
-        const auto decision = delivery_decision(ic);
+        auto decision = delivery_decision(ic);
+        if (state.prefer_keys &&
+            decision.strategy == nexkey::DeleteStrategy::SurroundingText) {
+            // This client dropped the last deletion. Asking it again would drop
+            // this one too, and the word would grow a letter nobody typed.
+            decision.strategy = nexkey::DeleteStrategy::ForwardedKey;
+        }
         if (decision.strategy != nexkey::DeleteStrategy::InjectedKey) {
             apply_edit(ic, edit, decision.strategy);
             return;
@@ -828,6 +843,7 @@ private:
     void burst_lost(fcitx::InputContext* ic, NexKeyState& state)
     {
         state.burst.finish();
+        state.prefer_keys = false;
         state.engine.discard();
         state.direct.reset();
         // Whatever was queued belonged to that word.
@@ -914,7 +930,7 @@ private:
         }
 
         const auto verification =
-            state.direct.verify(utf8_prefix_chars(surrounding.text(), surrounding.cursor()));
+            state.direct.verify(utf8_prefix(surrounding.text(), surrounding.cursor()));
         if (!verification.has_value()) {
             return;
         }
@@ -942,6 +958,9 @@ private:
                                              : decision.strategy;
             flush_commits(ic, state);
             apply_edit(ic, verification->repair, repair_strategy);
+            // The rest of this word is typed the way every client gets right,
+            // instead of losing another letter to the same request.
+            state.prefer_keys = true;
             state.mismatches.push_back(now);
             ++state.dropped;
             if (state.dropped >= 2) {
@@ -1042,6 +1061,11 @@ private:
 
     void commit_all(fcitx::InputContext* ic, NexKeyState& state)
     {
+        // The edit of the last keystroke has not been checked yet: this is the
+        // last chance to see that the client dropped it, before the word ends
+        // and the mirror forgets what it asked for.
+        verify_direct(ic, state);
+
         // A burst may still be holding the tail of the word. Type it first: the
         // deletions are already in the document and without the text they would
         // leave the word chopped. A drained burst has handed its text out
@@ -1066,6 +1090,11 @@ private:
             }
             update_preedit(ic, state);
         }
+
+        // The word is over, so the next one starts on the normal path again.
+        // A client that keeps failing gets a rule in [app_rules] instead of
+        // slowing every word down forever.
+        state.prefer_keys = false;
     }
 
     /// Commit `text` and end the composition.
@@ -1076,6 +1105,12 @@ private:
     /// would leave both.
     void commit_text(fcitx::InputContext* ic, NexKeyState& state, std::string_view text)
     {
+        // The candidate window and the space key reach this without passing
+        // through the check keyEvent does, and the edit below is planned
+        // against the mirror: an edit the client dropped since the last
+        // keystroke has to be repaired first, or the deletion count is wrong.
+        verify_direct(ic, state);
+
         if (use_direct_typing(ic)) {
             deliver_edit(ic, state, state.direct.replace(text));
             state.direct.reset();
@@ -1083,6 +1118,7 @@ private:
             ic->commitString(std::string(text));
         }
         state.engine.discard();
+        state.prefer_keys = false;
         update_preedit(ic, state);
     }
 

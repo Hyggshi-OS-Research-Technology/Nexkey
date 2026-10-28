@@ -265,7 +265,14 @@ More detail is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md),
 
 The test suite covers the tone placement rules, Telex, VNI and VIQR parsing,
 escape sequences, the fallback for non-Vietnamese words, the engine state
-machine, charset conversion, configuration handling and the UTF-8 helpers:
+machine, charset conversion, configuration handling and the UTF-8 helpers.
+
+The direct typing path is covered end to end: `tests/test_typing.cpp` types the
+words of the known bug reports into a simulated document, with a client that is
+honest, one that ignores `deleteSurroundingText`, one that reports its text a
+round trip late and one that reports nothing. A character that goes missing
+between the engine, the edit and the document fails there, which a test of the
+engine alone cannot see.
 
 ```bash
 ctest --test-dir build --output-on-failure

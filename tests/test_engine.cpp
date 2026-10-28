@@ -68,6 +68,79 @@ TEST(engine_backspace_restores)
     EXPECT_EQ(engine.preedit(), std::string("ti\u00EAn"));
 }
 
+TEST(engine_every_keystroke_of_a_word)
+{
+    // What the frontend sees key by key, not only at the end of the word: the
+    // addon commits or replaces the document after every one of these steps, so
+    // a preedit that is wrong for a moment is a character in the wrong place on
+    // the screen.
+    struct Step {
+        char key;
+        const char* preedit;
+    };
+    const Step diacritic_marks[] = {
+        {'c', "c"}, {'a', "ca"}, {'a', "c\u00E2"}, {'s', "c\u1EA5"},
+    };
+    nexkey::Engine engine;
+    for (const auto& step : diacritic_marks) {
+        const auto result = engine.type(step.key);
+        EXPECT_EQ(result.preedit, std::string(step.preedit));
+        // Nothing is committed while the word is being typed: in direct typing
+        // the document is edited in place.
+        EXPECT_TRUE(result.commit.empty());
+        EXPECT_TRUE(result.handled);
+    }
+
+    const Step long_word[] = {
+        {'t', "t"},    {'i', "ti"},   {'e', "tie"},  {'e', "ti\u00EA"},
+        {'n', "ti\u00EAn"}, {'g', "ti\u00EAng"}, {'s', "ti\u1EBFng"},
+    };
+    nexkey::Engine other;
+    for (const auto& step : long_word) {
+        const auto result = other.type(step.key);
+        EXPECT_EQ(result.preedit, std::string(step.preedit));
+        EXPECT_TRUE(result.commit.empty());
+    }
+}
+
+TEST(engine_every_backspace_of_a_word)
+{
+    // Each BackSpace must change the visible word, and the change must be the
+    // one the user expects: the tone goes first, then the letter it sits on.
+    nexkey::Engine engine;
+    feed(engine, "caas");
+    EXPECT_EQ(engine.preedit(), std::string("c\u1EA5"));
+
+    const char* expected[] = {"c\u00E2", "ca", "c"};
+    for (const char* step : expected) {
+        const auto result = engine.backspace();
+        EXPECT_TRUE(result.handled);
+        EXPECT_EQ(result.preedit, std::string(step));
+    }
+
+    // The last letter leaves the composition, which the engine still consumes:
+    // a preedit frontend clears its preedit, and a direct typing frontend sees
+    // an empty preedit and deletes the letter from the document itself.
+    const auto emptied = engine.backspace();
+    EXPECT_TRUE(emptied.handled);
+    EXPECT_TRUE(emptied.preedit.empty());
+    EXPECT_FALSE(engine.composing());
+
+    // Only when there is nothing left to compose does the key belong to the
+    // application again.
+    const auto empty = engine.backspace();
+    EXPECT_FALSE(empty.handled);
+}
+
+TEST(engine_a_tone_key_twice_removes_the_tone)
+{
+    nexkey::Engine engine;
+    feed(engine, "cas");
+    EXPECT_EQ(engine.preedit(), std::string("c\u00E1"));
+    static_cast<void>(engine.type('s'));
+    EXPECT_EQ(engine.preedit(), std::string("cas"));
+}
+
 TEST(engine_backspace_without_composition)
 {
     nexkey::Engine engine;

@@ -142,15 +142,23 @@ keyboard, and the replacement of an earlier letter is the part applications
 disagree about. Instead of a list of program names, the addon watches what each
 application actually does with a replacement and steps down a ladder:
 
-1. `direct`: type into the document, delete through `deleteSurroundingText`.
-2. `direct-keys`: type into the document, delete by forwarding `BackSpace`.
+1. `direct-uinput`: type into the document, delete through the virtual keyboard
+   helper, which an application cannot tell apart from a real key press (see
+   [UINPUT.md](UINPUT.md)).
+2. `direct`: type into the document, delete through `deleteSurroundingText`.
+3. `direct-keys`: type into the document, delete by forwarding `BackSpace`.
    This is the path for browsers, Electron applications and anything else that
    accepts the delete request and ignores it.
-3. `preedit`: show the word with an underline and commit it once, like most
+4. `preedit`: show the word with an underline and commit it once, like most
    Linux input methods. Nothing is ever deleted, so every application can do it.
 
-When the second replacement in a row is dropped, NexKey repairs the word on
-screen (so the text stays what was typed), writes the next step into
+A replacement is checked against what the application reports about its
+document: the addon compares the **end** of the reported text with what the edit
+asked for, because the report is the whole text before the cursor and the
+session only mirrors the word being typed. When a client verifiably ignored a
+deletion, the word is repaired on the spot and the rest of that word is deleted
+with forwarded keys, so the same word cannot lose a second character. When the
+second replacement in a row is dropped, NexKey writes the next step into
 `[app_rules]` and saves the configuration; the next session starts one rung
 lower. The reason is shown in the tray diagnostics, together with the number of
 recent mismatches:
@@ -202,6 +210,8 @@ restart. [docs/CONFIGURATION.md](CONFIGURATION.md) lists every key.
 | The toggle key does nothing | it collides with the Fcitx5 trigger or a desktop shortcut; pick another combination with `nexkey config set ui.toggle_key` |
 | Vietnamese text appears twice | IBus and Fcitx5 are both running; use one of them (see [docs/IBUS.md](IBUS.md)) |
 | A word loses a letter in one application only | the application ignores `deleteSurroundingText`; NexKey repairs the word and switches that program to `direct-keys` after the second occurrence. Add `nexkey config set app_rules.<program> preedit` to go straight to the underlined path |
+| The second letter of every word replaces the first, or words come out as raw keystrokes, in any application | this was a bug of the direct typing path: the check after each replacement compared the whole reported document with the word instead of its end, decided on every keystroke that the document was not its own, and dropped the composition. It is fixed; a build older than that fix shows exactly this. Check with `nexkey test --trace caas`, which must print `c`, `ca`, `c\u00e2`, `c\u1EA5`, and update the addon (`./scripts/install-local.sh`) |
+| Backspace removes the letter instead of the tone, or leaves two letters | the tone is a different character from the bare letter, so removing it is a replacement and not a deletion: the application has to delete one character and type another. A client that ignores that deletion is repaired by the addon and moved to `direct-keys`; `nexkey config set app_rules.<program> direct-keys` makes it immediate |
 | The underscore appears in a terminal or a chat window | that application has no client preedit, so the word is drawn in the input method panel; the text itself is correct. `nexkey config set engine.direct_typing false` makes it the same everywhere |
 | No input at all in GTK or Qt applications | install the matching `fcitx5-frontend-*` package; under X11 the environment normally needs `GTK_IM_MODULE=fcitx`, `QT_IM_MODULE=fcitx` and `XMODIFIERS=@im=fcitx` |
 | No candidate window on GNOME Wayland | GNOME has no built-in panel for Fcitx5; install the *kimpanel* GNOME extension, or use the classic user interface |
@@ -209,7 +219,22 @@ restart. [docs/CONFIGURATION.md](CONFIGURATION.md) lists every key.
 
 `fcitx5-diagnose` prints the environment, the frontends and the loaded addons;
 it is the first thing to run when something is off. `nexkey test "tieengs"`
-bypasses Fcitx5 entirely and shows whether the engine itself behaves.
+bypasses Fcitx5 entirely and shows whether the engine itself behaves, and
+`nexkey test --trace caas` prints the composition after every keystroke, which
+is what the addon sees one key at a time:
+
+```
+  1: 'c' -> [c]
+  2: 'a' -> [ca]
+  3: 'a' -> [câ]
+  4: 's' -> [cấ]
+```
+
+If that output is right and an application still shows something else, the
+engine is not the problem: the addon, the frontend of that toolkit or the
+application's treatment of `deleteSurroundingText` is. The diagnostics page of
+the tray application names the rung in use for the window that has focus, which
+is the answer to "why this application".
 
 ## Uninstall
 
