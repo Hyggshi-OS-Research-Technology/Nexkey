@@ -90,7 +90,9 @@ TEST(a_client_that_ignores_deletions_still_ends_with_the_right_text)
     auto client = document(Behaviour::IgnoresDeletion);
 
     sim::type_all(method, client, "caas");
-    EXPECT_TRUE(method.repairs() >= 0);
+    // "c" and "ca" are appends and need no deletion; "c\u00E2" and "c\u1EA5"
+    // each ask for one, which this client drops, and each is repaired.
+    EXPECT_TRUE(method.repairs() >= 1);
     EXPECT_EQ(client.document(), std::string("Xin ch\xC3\xA0o c\xE1\xBA\xA5"));
 }
 
