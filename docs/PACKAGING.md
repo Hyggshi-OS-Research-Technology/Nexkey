@@ -26,6 +26,8 @@ depending on the prefix CMake was configured with):
 ```
 /usr/bin/nexkey-gui                            tray application
 /usr/bin/nexkey                                command line tool
+/usr/bin/nexkey-uinput                         virtual keyboard helper (optional)
+/usr/lib/systemd/user/nexkey-uinput.service    user unit for the helper
 /usr/lib/<libdir>/fcitx5/nexkey.so             Fcitx5 input method addon
 /usr/lib/<libdir>/nexkey/nexkey-ibus           IBus input method engine
 /usr/lib/<libdir>/libnexkey-core.a             static core library
@@ -37,9 +39,17 @@ depending on the prefix CMake was configured with):
 /usr/share/applications/nexkey.desktop
 /usr/share/nexkey/nexkey-autostart.desktop     template for the autostart entry
 /usr/share/icons/hicolor/scalable/...
-/usr/share/doc/NexKey/                         README, license, docs
+/usr/share/doc/NexKey/                         README, license, docs (incl. UINPUT.md)
 /etc/xdg/autostart/nexkey.desktop              created by postinst, removed by postrm
 ```
+
+The virtual keyboard helper is installed but its user unit is not enabled: the
+input method works without it and only loses the rung that some applications
+need, so enabling it is the user's decision (`systemctl --user enable --now
+nexkey-uinput`). The udev rule that gives the helper access to `/dev/uinput` is
+shipped as `packaging/udev/60-nexkey-uinput.rules` and deliberately **not**
+installed by the package, because it changes who may create input devices; see
+[docs/UINPUT.md](UINPUT.md).
 
 IBus reads the engine location from `nexkey.xml`, so the installed copy is
 rewritten at install time to the prefix the package really uses (`/usr` for the

@@ -13,9 +13,12 @@
 //      the burst are counted, a key press that is neither text nor a known
 //      shortcut ends the wait early, and the barrier key finishes the burst.
 //   3. finish() returns the text to type, or an empty string when the word has
-//      to be abandoned.
-//   4. If neither the count nor the barrier arrives in time, expire() says what
-//      to do: never wait forever for a helper that died.
+//      to be abandoned. A key that cannot wait for the burst (Return, a
+//      shortcut) takes the text with finish_early() instead; the keys that were
+//      already pressed are still swallowed while the state drains.
+//   4. If neither the count nor the barrier arrives in time, the state becomes
+//      Expired and the word is dropped: never wait forever for a helper that
+//      died.
 //
 // Keys the user types during the ~50 ms of a burst are buffered instead of
 // being applied in the middle of it, which would interleave two different texts
