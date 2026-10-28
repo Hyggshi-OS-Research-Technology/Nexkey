@@ -55,7 +55,36 @@ IBus reads the engine location from `nexkey.xml`, so the installed copy is
 rewritten at install time to the prefix the package really uses (`/usr` for the
 `.deb`); a plain `cmake --install --prefix` therefore stays consistent as well.
 
-The maintainer scripts do the following:
+### Removing a local installation
+
+A source install into `/usr/local` is not in any package database, so it has to
+be removed by hand or it stays behind as the stale files that make the next
+build look broken. `scripts/uninstall-local.sh` does it:
+
+```bash
+./scripts/uninstall-local.sh --dry-run   # what would be removed
+./scripts/uninstall-local.sh             # remove it
+./scripts/uninstall-local.sh --purge     # ... and ~/.config/nexkey, ~/.cache/nexkey
+```
+
+What it does, in this order:
+
+1. `systemctl --user disable --now nexkey-uinput`, so no running helper keeps a
+   deleted binary open (and so the next install cannot fail with "Text file
+   busy").
+2. Removes every path of `${prefix}` that `install_manifest.txt` names, plus the
+   files an install writes without a manifest entry (the IBus component file)
+   and the ones a manifest of another prefix would not mention. Paths outside
+   the prefix are never touched, and a path is only removed when it exists.
+3. Removes the directories that only existed for NexKey with `rmdir`, which
+   refuses to touch one that still holds another program's files.
+4. With `--purge`, removes the configuration and the caches as well.
+
+What it does not do is edit Fcitx5's own profile: remove "NexKey" from the input
+method list in `fcitx5-configtool` before or after, or Fcitx5 keeps an entry for
+an addon that is no longer there.
+
+The maintainer scripts of the `.deb` do the following:
 
 | Script | Work |
 | --- | --- |

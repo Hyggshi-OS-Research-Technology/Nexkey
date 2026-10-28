@@ -136,7 +136,15 @@ not built for:
 ```bash
 ./scripts/install-local.sh            # build and install into /usr/local
 ./scripts/check-install.sh            # verify what Fcitx5 needs
+./scripts/uninstall-local.sh          # remove it again (--purge also removes the config)
 ```
+
+`uninstall-local.sh` stops and disables `nexkey-uinput` first, removes the files
+the install wrote (it reads `install_manifest.txt`, and knows the paths when the
+build tree is gone) and leaves the configuration alone unless `--purge` is
+passed. `--dry-run` prints what it would remove. Reinstalling over an existing
+tree works as well: `install-local.sh` stops the helper around the install,
+because the kernel refuses to overwrite a running binary.
 
 A `.deb` from the CI artifacts is built on Ubuntu 24.04 and targets that
 release; on an older release build the package locally with

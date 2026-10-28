@@ -55,6 +55,17 @@ else
     install_prefix=()
 fi
 
+# The helper may be running from an earlier installation. The kernel refuses to
+# overwrite a binary that is being executed, so it is stopped first and started
+# again afterwards when it was running.
+helper_was_running=0
+if command -v systemctl >/dev/null 2>&1 &&
+    systemctl --user is-active --quiet nexkey-uinput.service; then
+    helper_was_running=1
+    printf '== stopping nexkey-uinput for the install\n'
+    systemctl --user stop nexkey-uinput.service >/dev/null 2>&1 || true
+fi
+
 printf '== configuring %s\n' "${build_dir}"
 cmake -S "${root}" -B "${build_dir}" \
     -DCMAKE_BUILD_TYPE=Release \
@@ -66,6 +77,14 @@ cmake --build "${build_dir}" --parallel "$(nproc 2>/dev/null || echo 2)"
 
 printf '\n== installing into %s\n' "${prefix}"
 "${install_prefix[@]}" cmake --install "${build_dir}"
+
+if [ "${helper_was_running}" -eq 1 ]; then
+    # The unit file itself may have changed, so the user manager is told before
+    # the service is started again.
+    systemctl --user daemon-reload >/dev/null 2>&1 || true
+    systemctl --user start nexkey-uinput.service >/dev/null 2>&1 ||
+        printf 'warning: nexkey-uinput did not start again\n' >&2
+fi
 
 if [ "${run_check}" -eq 1 ] && [ -x "${root}/scripts/check-install.sh" ]; then
     printf '\n== checking the installation\n'
@@ -82,9 +101,13 @@ Next steps:
   3. Switch to NexKey with the Fcitx5 trigger key (usually Control+space).
 
 The configuration lives in ~/.config/nexkey/nexkey.conf.
+
+The optional virtual keyboard helper is installed but not enabled:
+  sudo install -m 0644 ${root}/packaging/udev/60-nexkey-uinput.rules /etc/udev/rules.d/
+  systemctl --user enable --now nexkey-uinput
+docs/UINPUT.md explains what it is for and what it can do.
+
 To remove this installation again:
-  sudo rm -rf ${prefix}/bin/nexkey ${prefix}/bin/nexkey-gui \\
-              ${prefix}/share/fcitx5/addon/nexkey.conf \\
-              ${prefix}/share/fcitx5/inputmethod/nexkey.conf \\
-              ${prefix}/share/ibus/component/nexkey.xml
+  ./scripts/uninstall-local.sh --prefix ${prefix}
+Add --purge to delete ~/.config/nexkey and ~/.cache/nexkey as well.
 MESSAGE

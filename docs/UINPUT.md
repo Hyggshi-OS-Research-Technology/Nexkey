@@ -145,6 +145,11 @@ not enabled by default, because nothing depends on it:
 
     systemctl --user enable --now nexkey-uinput
 
+Removing NexKey again is `scripts/uninstall-local.sh`, which stops and disables
+the unit before it deletes the binary; doing it by hand means
+`systemctl --user disable --now nexkey-uinput` first, or the next install cannot
+replace a helper that is still running.
+
 `--dry-run` needs no device and is the way to try the whole path on a machine
 where `/dev/uinput` is not available: start the helper with `--dry-run`, then run
 the addon and watch the requests arrive in the helper's output.
