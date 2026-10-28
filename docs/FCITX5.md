@@ -1,9 +1,16 @@
 # Fcitx5 addon
 
 NexKey speaks Fcitx5 natively: the engine is an addon that Fcitx5 loads when the
-NexKey input method is selected. There is no helper process and nothing to
-supervise, so once the files are installed the desktop integration behaves like
-that of any other input method.
+NexKey input method is selected. Once the files are installed the desktop
+integration behaves like that of any other input method.
+
+There is one optional companion process. `nexkey-uinput` deletes through a
+virtual keyboard device for the applications that ignore `deleteSurroundingText`
+and forwarded keys, and the addon uses it only when it is running; without it
+the addon deletes the next best way and nothing else changes. It needs write
+access to `/dev/uinput`, which is why it is a separate program rather than part
+of the addon. [UINPUT.md](UINPUT.md) describes it, including the udev rule and
+the systemd user unit.
 
 ```
 integrations/fcitx5/nexkey.cpp              the addon
@@ -17,7 +24,9 @@ integrations/fcitx5/data/nexkey.conf        input method entry, Addon=nexkey, La
 | --- | --- |
 | `NexKeyEngine` | the `fcitx::InputMethodEngine` implementation |
 | `nexkey-state` | an `InputContextProperty` holding one `nexkey::Engine`, so every window, tab and text field keeps its own composition |
-| `keyEvent` | the toggle shortcut, the word selection window, backspace and the ordinary keystroke path |
+| `keyEvent` | the toggle shortcut, the word selection window, backspace, the keys of a deletion burst and the ordinary keystroke path |
+| `ReplacementController` | per input context: the burst of deletions in flight, the keys buffered during it and the deadline that ends it |
+| `timer` | one 20 ms `EventSourceTime` that finishes a burst whose barrier was lost and types the text when the user stops typing |
 | `subMode` / `overrideIcon` | `VI` or `EN` in the panel, with the matching `nexkey-vn` / `nexkey-en` icon |
 | configuration watch | the addon reloads `nexkey.conf` when it changes, at most four times per second |
 

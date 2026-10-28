@@ -23,6 +23,9 @@ nexkey-tests       tests/
 | `nexkey/Settings.hpp` | INI configuration reader and writer |
 | `nexkey/Unicode.hpp` | Strict UTF-8, code point and grapheme cluster measuring |
 | `nexkey/Delivery.hpp` | Direct typing policy, edit planning and document verification |
+| `nexkey/Uinput.hpp` | Wire format and timing plan of the virtual keyboard helper |
+| `nexkey/Replacement.hpp` | One delete-then-type transaction and the commit batcher |
+| `nexkey/UinputClient.hpp` | Client side of the helper's socket |
 
 Internal translation units:
 
@@ -32,6 +35,9 @@ Internal translation units:
 | `core/src/Syllable.cpp` | Onset, nucleus and coda tables, tone position, plausibility |
 | `core/src/Grapheme.cpp` | Composed code point table and reverse lookup |
 | `core/src/Delivery.cpp` | Delivery ladder, `plan_edit` and `DirectSession` |
+| `core/src/Uinput.cpp` | Protocol, limits, trusted peer check and timing plan of the virtual keyboard helper |
+| `core/src/Replacement.cpp` | One delete-then-type transaction: burst, barrier, deadline, and commit batching |
+| `core/src/UinputClient.cpp` | Non-blocking client for the helper's socket |
 
 ### Text measurement
 
@@ -199,13 +205,24 @@ per application by `nexkey::DeliveryPolicy`:
 
 | Rung | Deletion | Used when |
 | --- | --- | --- |
-| `direct` | `deleteSurroundingText`, counted in characters | the client reports its text |
-| `direct-keys` | one forwarded `BackSpace` per character | the client reports no text, or dropped a deletion |
+| `direct-uinput` | `BACKSPACE` on a virtual keyboard device, through the kernel | `nexkey-uinput` is running, see [UINPUT.md](UINPUT.md) |
+| `direct` | `deleteSurroundingText`, counted in characters | no helper, and the client reports its text |
+| `direct-keys` | one forwarded `BackSpace` per character | no helper, and the client reports no text, or dropped a deletion |
 | `preedit` | none, the word is committed once when it ends | the client dropped both |
 
 Nothing in that table is a list of program names. A rung is left behind on
 evidence: after each keystroke the addon compares the end of the document, as
 the client reports it, with what the edit asked for (`DirectSession::verify`).
+
+The top rung is asynchronous and cannot be checked that way, so it has its own
+bookkeeping. `nexkey::ReplacementController` submits a burst, swallows the
+backspaces as they come back through the input method, waits for the barrier key
+that closes the burst, buffers whatever the user types meanwhile, and gives up
+after a deadline. `nexkey::CommitBatcher` merges the commits of one key event so
+that a slow client sees one insertion rather than three. Both are toolkit free and
+tested; `nexkey-uinput`, the helper that owns `/dev/uinput`, is a separate
+process with a protocol that can only ask for `BACKSPACE`. [UINPUT.md](UINPUT.md)
+has the details, including what the design cannot promise.
 
 - **Landed**: the document ends with the new text, nothing happens.
 - **Deletion ignored**: the old characters are still there and the new ones

@@ -3,6 +3,8 @@ add_executable(nexkey-tests
     test_encoding.cpp
     test_candidates.cpp
     test_delivery.cpp
+    test_replacement.cpp
+    test_uinput.cpp
     test_engine.cpp
     test_settings.cpp
     test_status.cpp

@@ -65,7 +65,8 @@ AppRule parse_app_rule(std::string_view value)
             continue;
         }
         if (part == "preedit" || part == "compose" || part == "direct" ||
-            part == "direct-keys" || part == "direct-backspace") {
+            part == "direct-keys" || part == "direct-backspace" || part == "direct-uinput" ||
+            part == "direct-inject") {
             rule.delivery = part;
             rule.valid = true;
             continue;
@@ -111,10 +112,12 @@ Decision DeliveryPolicy::decide(const ClientInfo& client) const
                         DeliverySource::Setting};
     }
 
-    // Deleting a number of characters needs to know where the cursor is, so a
-    // client that does not report its text can only be served with keys.
-    const DeleteStrategy available = client.surrounding_valid ? DeleteStrategy::SurroundingText
-                                                              : DeleteStrategy::ForwardedKey;
+    // The best available deletion, in order: the virtual keyboard (a real key
+    // press, impossible for a client to tell apart), the surrounding text (a
+    // request some clients ignore) and finally a forwarded key.
+    const DeleteStrategy best = client.helper  ? DeleteStrategy::InjectedKey
+                                : client.surrounding_valid ? DeleteStrategy::SurroundingText
+                                                           : DeleteStrategy::ForwardedKey;
 
     const std::string rule = delivery_of(m_rules, client.program);
     if (rule == "preedit" || rule == "compose") {
@@ -122,16 +125,30 @@ Decision DeliveryPolicy::decide(const ClientInfo& client) const
                         DeliverySource::AppRule};
     }
     if (rule == "direct") {
-        return Decision{DeliveryMode::Direct, available, DeliverySource::AppRule};
+        return Decision{DeliveryMode::Direct, best, DeliverySource::AppRule};
     }
     if (rule == "direct-keys" || rule == "direct-backspace") {
         return Decision{DeliveryMode::Direct, DeleteStrategy::ForwardedKey,
                         DeliverySource::AppRule};
     }
+    if (rule == "direct-uinput" || rule == "direct-inject") {
+        // Forced: used by the learned fallback that walks back up the ladder
+        // once a client has proven it accepts real key presses.
+        return Decision{DeliveryMode::Direct,
+                        client.helper ? DeleteStrategy::InjectedKey : DeleteStrategy::ForwardedKey,
+                        DeliverySource::AppRule};
+    }
 
-    return Decision{DeliveryMode::Direct, available,
-                    available == DeleteStrategy::SurroundingText ? DeliverySource::Default
-                                                                 : DeliverySource::NoSurroundingText};
+    switch (best) {
+    case DeleteStrategy::InjectedKey:
+        return Decision{DeliveryMode::Direct, best, DeliverySource::Default};
+    case DeleteStrategy::SurroundingText:
+        return Decision{DeliveryMode::Direct, best, DeliverySource::Default};
+    case DeleteStrategy::ForwardedKey:
+        return Decision{DeliveryMode::Direct, best, DeliverySource::NoSurroundingText};
+    }
+    return Decision{DeliveryMode::Direct, DeleteStrategy::ForwardedKey,
+                    DeliverySource::NoSurroundingText};
 }
 
 std::string_view DeliveryPolicy::fallback_rule(const Decision& failed) noexcept
@@ -139,8 +156,14 @@ std::string_view DeliveryPolicy::fallback_rule(const Decision& failed) noexcept
     if (failed.mode != DeliveryMode::Direct) {
         return {};
     }
-    if (failed.strategy == DeleteStrategy::SurroundingText) {
+    switch (failed.strategy) {
+    case DeleteStrategy::InjectedKey:
+        // The helper did not deliver. The next rung asks the client instead.
+        return "direct";
+    case DeleteStrategy::SurroundingText:
         return "direct-keys";
+    case DeleteStrategy::ForwardedKey:
+        return "preedit";
     }
     return "preedit";
 }

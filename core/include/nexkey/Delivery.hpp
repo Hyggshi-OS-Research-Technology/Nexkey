@@ -35,6 +35,12 @@ enum class DeliveryMode : std::uint8_t {
 
 /// How a direct replacement removes the characters it does not need any more.
 enum class DeleteStrategy : std::uint8_t {
+    /// Press BackSpace on a virtual keyboard device, through the kernel. The
+    /// application receives a genuine key press from a genuine device, so this
+    /// works even where every other request is ignored. It needs the helper,
+    /// and it is asynchronous: the frontend waits for a barrier key before it
+    /// types the replacement.
+    InjectedKey,
     /// Ask the client to delete a number of characters before the cursor.
     /// Exact and fast, but the request is silently dropped by some toolkits.
     SurroundingText,
@@ -50,7 +56,8 @@ enum class DeliverySource : std::uint8_t {
     Default,          ///< Nothing special: direct typing where it can work.
     Setting,          ///< Direct typing is turned off in the settings.
     AppRule,          ///< The [app_rules] section names this application.
-    NoSurroundingText ///< The client does not report its text, see the comment.
+    NoSurroundingText, ///< The client does not report its text, see the comment.
+    NoHelper          ///< The virtual keyboard helper is not running.
 };
 
 /// What a frontend should do with the text of one word.
@@ -92,18 +99,21 @@ struct ClientInfo {
     bool surrounding_text{false};
     /// ...and it actually delivers it, with a cursor position.
     bool surrounding_valid{false};
+    /// The virtual keyboard helper answered a probe recently.
+    bool helper{false};
 };
 
 /// Decide between the direct and the preedit path.
 ///
 /// The rule is deliberately simple: direct typing is the default, because it is
-/// what makes NexKey feel like a keyboard rather than a popup. A client that
-/// cannot report its text still gets the direct path, but with deletions sent
-/// as BackSpace keys, because deleting a number of characters requires knowing
-/// where the cursor is. What the policy cannot know is whether the client
-/// honours the request, so a frontend that sees a dropped replacement writes
-/// fallback_rule() into the configuration and the next session starts one step
-/// further down.
+/// what makes NexKey feel like a keyboard rather than a popup. When the helper
+/// is running, deletions go through the virtual keyboard and the client cannot
+/// tell them from a real key press. Without it, a client that reports its text
+/// is asked to delete, and one that does not gets forwarded BackSpace keys,
+/// because deleting a number of characters requires knowing where the cursor
+/// is. What the policy cannot know is whether the client honours the request,
+/// so a frontend that sees a dropped replacement writes fallback_rule() into the
+/// configuration and the next session starts one step further down.
 class DeliveryPolicy {
 public:
     /// Options::direct_typing, the global switch.

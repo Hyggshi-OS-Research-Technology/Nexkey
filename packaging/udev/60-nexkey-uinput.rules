@@ -1,0 +1,13 @@
+# NexKey: the user of the active seat may create a virtual keyboard.
+#
+# nexkey-uinput needs write access to /dev/uinput to register its device. This
+# rule gives that access to the user of the seat that is currently active, and to
+# nobody else; every other user keeps the default permissions.
+#
+#   sudo install -m 0644 60-nexkey-uinput.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload
+#   sudo udevadm trigger --name-match=uinput
+#
+# The alternative, if the distribution has an "uinput" group, is to add the user
+# to that group and log out and back in.
+KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput"

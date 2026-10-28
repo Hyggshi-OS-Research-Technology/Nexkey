@@ -107,6 +107,7 @@ name an input method, a delivery mode, or both joined with `+` or `,`
 | --- | --- |
 | `telex`, `telex-simple`, `vni`, `viqr`, `microsoft` | input method for that program |
 | `off` (or `en`, `english`) | the program gets the keystrokes untouched |
+| `direct-uinput` (also `direct-inject`) | type straight into the document, delete through the virtual keyboard helper `nexkey-uinput`; works in programs that ignore every other deletion, see [UINPUT.md](UINPUT.md) |
 | `direct` | type straight into the document, delete with `deleteSurroundingText` when the program reports its text |
 | `direct-keys` | type straight into the document, delete with forwarded `BackSpace` keys; slower, but programs that ignore `deleteSurroundingText` still work |
 | `preedit` | show the word with an underline and commit it once; the slowest and the most compatible |
@@ -118,11 +119,13 @@ gnome-terminal=off
 firefox=vni
 chrome=preedit
 libreoffice=telex+direct-keys
+chrome=direct-uinput
 ```
 
 NexKey writes a rule itself when it catches an application dropping a
 replacement: the word on screen is repaired first, and the second failure in a
-row saves the next step of the ladder (`direct` to `direct-keys` to `preedit`)
+row saves the next step of the ladder (`direct-uinput` to `direct` to `direct-keys`
+to `preedit`)
 here. Only the delivery half is rewritten, so a method that was set for the same
 program survives. Deleting the line, or `nexkey config set app_rules.<program>
 auto`, makes NexKey try the faster path again.

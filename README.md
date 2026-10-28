@@ -29,12 +29,16 @@ with CMake.
                    |   nexkey-core (C++23)   |
                    |   engine + charsets     |
                    +-------------------------+
+
+  nexkey-uinput (optional, separate process) presses BACKSPACE through
+  /dev/uinput for the applications that ignore everything else.
 ```
 
 ## Features
 
 - **100% Native Direct Typing (Non-preedit)**: Eliminates annoying underlines while typing. Characters appear directly and immediately in the document (VS Code, Chrome, terminals, LibreOffice), avoiding input latency and visual clutter.
-- **Works in every application, without a list of names**: when an application drops a replacement, NexKey repairs the word on screen, then moves that program one step down a ladder — `deleteSurroundingText`, then forwarded `BackSpace` keys, then the underlined preedit — and remembers the choice in `[app_rules]`. Nothing is hard coded to a browser or an editor.
+- **Works in every application, without a list of names**: when an application drops a replacement, NexKey repairs the word on screen, then moves that program one step down a ladder — deletions through the virtual keyboard `nexkey-uinput`, then `deleteSurroundingText`, then forwarded `BackSpace` keys, then the underlined preedit — and remembers the choice in `[app_rules]`. Nothing is hard coded to a browser or an editor.
+- **Deleting through a virtual keyboard (optional)**: `nexkey-uinput` creates a keyboard device through `/dev/uinput` and presses `BACKSPACE`, which even Chromium and Electron applications honour, because as far as they can tell a real key was pressed. It is a separate process that can press `BACKSPACE` and nothing else, only for the user who started it. See [docs/UINPUT.md](docs/UINPUT.md).
 - **Ultra High Performance**: Leverages instant SurroundingText & key forwarding optimized for high-speed Linux applications across X11 & Wayland.
 - **System Tray Quick Settings**: Right-click the NexKey tray icon for instant toggles: output charset, spell check, macros, capitalized macro, non-Vietnamese auto-restore, custom dictionary, and the smart emoji picker.
 - **Per-Application Rules (App Rules)**: Assign dedicated input modes per application or window (e.g. `code` → `telex`, `gnome-terminal` → `off`, `firefox` → `vni`, `chrome` → `preedit`), from the tray window or with `nexkey config set app_rules.chrome preedit`.
@@ -70,6 +74,7 @@ Right-click the NexKey system tray icon to access quick settings:
 | Tray application | Qt 6.2+ (Core, Gui, Widgets, DBus) |
 | Fcitx5 addon | Fcitx5 5.0+ development files |
 | IBus engine | IBus 1.5+ development files |
+| Virtual keyboard deletions (optional) | `/dev/uinput`, plus a udev rule or the `uinput` group |
 | Tests | none |
 
 Every optional component is detected at configure time. A plain build with no
@@ -149,6 +154,18 @@ step by step instructions and troubleshooting.
 Both backends read `~/.config/nexkey/nexkey.conf` and reload it as soon as the
 tray application or `nexkey config set` rewrites the file.
 
+The Fcitx5 addon can delete through a virtual keyboard where everything else
+fails. That needs a udev rule for `/dev/uinput` and the helper running:
+
+```bash
+sudo install -m 0644 packaging/udev/60-nexkey-uinput.rules /etc/udev/rules.d/
+sudo udevadm control --reload && sudo udevadm trigger --name-match=uinput
+systemctl --user enable --now nexkey-uinput
+```
+
+NexKey works without it; this only adds the rung that applications ignoring
+synthetic deletions still honour. [docs/UINPUT.md](docs/UINPUT.md) explains it.
+
 The default toggle key is `Control+Shift`. It can be changed in the settings
 window or from the command line:
 
@@ -225,6 +242,7 @@ cli/                  nexkey command line tool
 gui/                  Qt6 tray application and D-Bus service
 integrations/fcitx5/  Fcitx5 input method addon
 integrations/ibus/    IBus input method engine and component file
+helpers/uinput/       nexkey-uinput, the optional virtual keyboard helper
 tests/                unit tests with a tiny built-in harness
 packaging/            desktop entry, Debian maintainer scripts
 scripts/              build, test and packaging helpers
@@ -232,8 +250,8 @@ docs/                 usage, configuration and architecture notes
 ```
 
 More detail is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md),
-[docs/FCITX5.md](docs/FCITX5.md), [docs/IBUS.md](docs/IBUS.md) and
-[docs/PACKAGING.md](docs/PACKAGING.md).
+[docs/FCITX5.md](docs/FCITX5.md), [docs/IBUS.md](docs/IBUS.md),
+[docs/UINPUT.md](docs/UINPUT.md) and [docs/PACKAGING.md](docs/PACKAGING.md).
 
 ## Testing
 

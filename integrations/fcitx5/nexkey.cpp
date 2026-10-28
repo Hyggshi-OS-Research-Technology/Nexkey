@@ -3,11 +3,14 @@
 
 #include "nexkey/Delivery.hpp"
 #include "nexkey/Engine.hpp"
+#include "nexkey/Replacement.hpp"
 #include "nexkey/Settings.hpp"
 #include "nexkey/Status.hpp"
 #include "nexkey/Types.hpp"
 #include "nexkey/Unicode.hpp"
+#include "nexkey/UinputClient.hpp"
 
+#include <fcitx-utils/event.h>
 #include <fcitx-utils/key.h>
 #include <fcitx-utils/keysym.h>
 #include <fcitx-utils/log.h>
@@ -46,6 +49,11 @@ using namespace std::chrono_literals;
 constexpr std::string_view kViIcon{"nexkey-vn"};
 constexpr std::string_view kEnIcon{"nexkey-en"};
 constexpr std::string_view kPropertyName{"nexkey-state"};
+
+/// How often the addon looks at the bursts in flight. A burst lasts tens of
+/// milliseconds, so this is fine enough to type a replacement as soon as it
+/// lands and cheap enough to run all the time.
+constexpr std::uint64_t kTickUsec{20000};
 
 struct ToggleKey {
     fcitx::Key key{fcitx::Key(FcitxKey_None)};
@@ -140,6 +148,12 @@ public:
     nexkey::DeliveryMode mode{nexkey::DeliveryMode::Direct};
     /// Times at which the document did not contain what direct typing wrote.
     std::vector<std::chrono::steady_clock::time_point> mismatches;
+    /// The burst of deletions that is in flight, and the text it will type when
+    /// it lands.
+    nexkey::ReplacementController burst;
+    /// Text that is ready to be committed, held for the length of one key event
+    /// so that the pieces of a replacement leave as a single commit.
+    nexkey::CommitBatcher commits;
 };
 
 /// The text helpers live in the core library so that the direct typing path and
@@ -155,6 +169,13 @@ inline std::size_t utf8_char_count(std::string_view text) noexcept
 inline std::string utf8_prefix_chars(std::string_view text, std::size_t chars)
 {
     return std::string(text.substr(0, nexkey::unicode::prefix_length(text, chars)));
+}
+
+/// Milliseconds on the clock the addon's event loop runs on, so that the burst
+/// deadlines and the timer that checks them agree.
+inline std::uint64_t monotonic_ms()
+{
+    return static_cast<std::uint64_t>(fcitx::now(CLOCK_MONOTONIC) / 1000);
 }
 
 /// Remove `count` characters before the cursor.
@@ -249,12 +270,32 @@ public:
             FCITX_WARN() << "NexKey: the input context property is already registered";
         }
         reload_settings(true);
+
+        // One timer for all input contexts. A burst has a deadline, and the text
+        // it holds has to be typed even when the user stops pressing keys, so
+        // neither can wait for the next key event.
+        timer_ = instance_->eventLoop().addTimeEvent(
+            CLOCK_MONOTONIC, fcitx::now(CLOCK_MONOTONIC) + kTickUsec, 0,
+            [this](fcitx::EventSourceTime* source, std::uint64_t) {
+                tick();
+                if (timer_ != nullptr) {
+                    source->setNextInterval(kTickUsec);
+                    source->setOneShot();
+                }
+                return true;
+            });
     }
 
     NexKeyEngine(const NexKeyEngine&) = delete;
     NexKeyEngine& operator=(const NexKeyEngine&) = delete;
 
-    ~NexKeyEngine() override { state_factory_.unregister(); }
+    ~NexKeyEngine() override
+    {
+        // The callback captures this: removing the source has to happen before
+        // the members it touches are gone.
+        timer_.reset();
+        state_factory_.unregister();
+    }
 
     void keyEvent(const fcitx::InputMethodEntry& entry, fcitx::KeyEvent& event) override
     {
@@ -263,9 +304,6 @@ public:
 
         if (handle_toggle_key(event)) {
             event.filterAndAccept();
-            return;
-        }
-        if (event.isRelease()) {
             return;
         }
 
@@ -280,6 +318,19 @@ public:
         }
 
         auto& state = state_of(ic);
+
+        // Keys of a deletion burst that is in flight. The helper presses them
+        // through the kernel, so they arrive here looking exactly like real key
+        // presses and must not be mistaken for the user editing the word. This
+        // runs before the release check because the barrier of a burst must not
+        // reach the application in either direction.
+        if (handle_burst_key(ic, state, event)) {
+            return;
+        }
+
+        if (event.isRelease()) {
+            return;
+        }
 
         // The word selection window comes first: its keys must not reach the
         // word parser. It also decides on its own when to keep the key, so the
@@ -368,8 +419,7 @@ public:
         }
         if (!step.commit.empty()) {
             if (use_direct_typing(ic)) {
-                const auto decision = delivery_decision(ic);
-                apply_edit(ic, state.direct.replace(step.commit), decision.strategy);
+                deliver_edit(ic, state, state.direct.replace(step.commit));
                 // The word is finished: the next one starts from an empty
                 // document tail, so nothing of this word can be deleted by
                 // accident later.
@@ -459,6 +509,10 @@ private:
             const auto mode = delivery_decision(ic).mode;
             if (state->mode != mode) {
                 state->mode = mode;
+                // The keys of a burst that is still travelling are eaten either
+                // way; only the text of the word is dropped, because the mode
+                // that would type it is gone.
+                state->burst.abandon();
                 state->engine.discard();
                 state->direct.reset();
             }
@@ -467,7 +521,7 @@ private:
     }
 
     /// What this input context can do, as far as delivering text is concerned.
-    nexkey::ClientInfo client_info(fcitx::InputContext* ic) const
+    nexkey::ClientInfo client_info(fcitx::InputContext* ic)
     {
         if (ic == nullptr) {
             return nexkey::ClientInfo{};
@@ -475,17 +529,322 @@ private:
         const bool capability =
             ic->capabilityFlags().test(fcitx::CapabilityFlag::SurroundingText);
         const bool valid = capability && ic->surroundingText().isValid();
-        return nexkey::ClientInfo{ic->program(), capability, valid};
+        return nexkey::ClientInfo{ic->program(), capability, valid, helper_available()};
     }
 
-    nexkey::Decision delivery_decision(fcitx::InputContext* ic) const
+    nexkey::Decision delivery_decision(fcitx::InputContext* ic)
     {
         return policy_.decide(client_info(ic));
     }
 
-    bool use_direct_typing(fcitx::InputContext* ic) const
+    bool use_direct_typing(fcitx::InputContext* ic)
     {
         return delivery_decision(ic).mode == nexkey::DeliveryMode::Direct;
+    }
+
+    // -----------------------------------------------------------------------
+    // Deleting through the virtual keyboard
+    // -----------------------------------------------------------------------
+
+    /// Ask the helper whether it is there, at most once every few seconds.
+    ///
+    /// This runs from the timer and never from a key event: a probe is a connect
+    /// and a line on a socket, and a key event must not wait for it. A yes is
+    /// reused for a while, a no is retried sooner, because starting the helper is
+    /// exactly what a user does after noticing that replacing does not work.
+    void probe_helper()
+    {
+        const auto now = std::chrono::steady_clock::now();
+        const auto age = now - helper_checked_;
+        if (helper_answered_ ? age < 3s : age < 1s) {
+            return;
+        }
+        helper_checked_ = now;
+        helper_answered_ = helper_.ping();
+        if (!helper_answered_) {
+            helper_.disconnect();
+        }
+    }
+
+    /// True when the last probe was answered. See probe_helper().
+    [[nodiscard]] bool helper_available() const noexcept { return helper_answered_; }
+
+    /// The deletion to use when the helper cannot take the burst after all.
+    nexkey::DeleteStrategy fallback_strategy(fcitx::InputContext* ic) const
+    {
+        const std::string_view program =
+            ic != nullptr ? std::string_view(ic->program()) : std::string_view{};
+        const bool capability =
+            ic != nullptr && ic->capabilityFlags().test(fcitx::CapabilityFlag::SurroundingText);
+        const bool valid = capability && ic->surroundingText().isValid();
+        return policy_.decide(nexkey::ClientInfo{program, capability, valid, false}).strategy;
+    }
+
+    /// Hold the text of one commit for the end of this key event.
+    ///
+    /// Everything that changes the document flushes first: the batcher exists to
+    /// merge consecutive commits, never to reorder them.
+    void queue_text(NexKeyState& state, std::string_view text)
+    {
+        state.commits.append(text, monotonic_ms());
+    }
+
+    void flush_commits(fcitx::InputContext* ic, NexKeyState& state)
+    {
+        if (ic == nullptr) {
+            return;
+        }
+        const std::string text = state.commits.take();
+        if (!text.empty()) {
+            ic->commitString(text);
+        }
+    }
+
+    /// Ask the helper for a burst. False when it did not take the request.
+    bool submit_burst(fcitx::InputContext* ic, NexKeyState& state, const nexkey::Edit& edit)
+    {
+        if (edit.delete_code_points > nexkey::uinput::kMaxBackspaces) {
+            return false;
+        }
+        const nexkey::uinput::Request request{
+            static_cast<std::uint32_t>(edit.delete_code_points), nexkey::uinput::Delays{}};
+        std::uint32_t performed = 0;
+        if (helper_.submit(request, performed) != nexkey::uinput::Submit::Sent) {
+            helper_answered_ = false;
+            helper_checked_ = std::chrono::steady_clock::now();
+            helper_.disconnect();
+            FCITX_WARN() << "NexKey: the virtual keyboard helper did not take a burst of "
+                         << request.backspaces;
+            return false;
+        }
+
+        // The count is only a shortcut: the barrier is what proves that the
+        // burst is over. Waiting for the larger of the two can cost the
+        // deadline, but it can never type the text before the deletions.
+        const std::uint32_t expected = std::max(request.backspaces, performed);
+        state.burst.start(expected, edit.commit, monotonic_ms());
+        if (state.burst.state() == nexkey::Burst::Complete) {
+            // Not a single key to press: the text can be typed at once.
+            finish_burst(ic, state, false);
+        }
+        return true;
+    }
+
+    /// Put one planned edit into the client with the mechanism it can take.
+    ///
+    /// The injected path is asynchronous: the text of the edit is not typed here
+    /// but by finish_burst(), when the burst lands.
+    void deliver_edit(fcitx::InputContext* ic, NexKeyState& state, nexkey::Edit edit)
+    {
+        if (ic == nullptr || edit.empty()) {
+            return;
+        }
+        // Text that is already queued belongs before this edit in the document.
+        flush_commits(ic, state);
+
+        if (edit.delete_code_points == 0) {
+            ic->commitString(edit.commit);
+            return;
+        }
+
+        const auto decision = delivery_decision(ic);
+        if (decision.strategy != nexkey::DeleteStrategy::InjectedKey) {
+            apply_edit(ic, edit, decision.strategy);
+            return;
+        }
+        if (submit_burst(ic, state, edit)) {
+            return;
+        }
+        // The helper went away between the probe and now: use what the client
+        // can take instead of dropping the word.
+        apply_edit(ic, edit, fallback_strategy(ic));
+    }
+
+    /// Type what a finished burst was holding, and catch up with the keys the
+    /// user pressed while it was in flight.
+    ///
+    /// `early` takes the text of a burst that has not finished, for a key that
+    /// cannot wait (Return, a shortcut). The remaining backspaces are swallowed
+    /// afterwards: they are already on their way.
+    void finish_burst(fcitx::InputContext* ic, NexKeyState& state, bool early)
+    {
+        auto& burst = state.burst;
+        std::string text;
+        if (burst.state() == nexkey::Burst::Complete) {
+            text = burst.finish();
+        } else if (early) {
+            text = burst.finish_early();
+        }
+        if (!text.empty()) {
+            queue_text(state, text);
+        }
+        replay_buffered(ic, state);
+        flush_commits(ic, state);
+    }
+
+    /// Type the characters that were buffered during a burst, in order.
+    void replay_buffered(fcitx::InputContext* ic, NexKeyState& state)
+    {
+        const std::u32string pending = state.burst.take_buffered();
+        for (std::size_t index = 0; index < pending.size(); ++index) {
+            if (state.burst.pending()) {
+                // Replaying started another burst. The characters that are left
+                // wait for the same barrier as the ones before them.
+                state.burst.restore(std::u32string_view(pending).substr(index));
+                return;
+            }
+            feed(ic, state, pending[index]);
+        }
+    }
+
+    /// Type one character through the engine, as if its key had just arrived.
+    ///
+    /// The key events of buffered characters were swallowed while the burst was
+    /// in flight, so this is the only place where they can still be typed.
+    void feed(fcitx::InputContext* ic, NexKeyState& state, char32_t code_point)
+    {
+        const auto step = state.engine.type(code_point);
+        if (!step.handled) {
+            // The character did not join the word: the composition ends and the
+            // character goes in on its own.
+            commit_all(ic, state);
+            std::string text;
+            nexkey::unicode::append(text, code_point);
+            queue_text(state, text);
+            return;
+        }
+        if (!step.commit.empty()) {
+            if (use_direct_typing(ic)) {
+                const nexkey::Edit edit = state.direct.replace(step.commit);
+                if (edit.delete_code_points == 0) {
+                    // A pure append shares the commit with the burst it follows.
+                    queue_text(state, edit.commit);
+                } else {
+                    deliver_edit(ic, state, edit);
+                }
+                state.direct.reset();
+            } else {
+                queue_text(state, step.commit);
+            }
+        }
+        update_preedit(ic, state);
+    }
+
+    /// Offer a key event to a burst that is in flight.
+    ///
+    /// Returns true when the key belongs to the burst and must not continue down
+    /// the normal path.
+    bool handle_burst_key(fcitx::InputContext* ic, NexKeyState& state, fcitx::KeyEvent& event)
+    {
+        auto& burst = state.burst;
+        const auto symbol = event.key().sym();
+
+        // The barrier is ours even when the burst just ended, because it was
+        // already in the kernel's queue when the last backspace arrived.
+        if (symbol == FcitxKey_Pause) {
+            if (event.isRelease()) {
+                if (!burst.barrier_expected()) {
+                    return false;
+                }
+                event.filterAndAccept();
+                return true;
+            }
+            if (burst.note_key(false, true, false, false, U'\0') == nexkey::KeyAction::Pass) {
+                return false;
+            }
+            finish_burst(ic, state, false);
+            event.filterAndAccept();
+            return true;
+        }
+
+        // Releases carry no meaning of their own here; the caller lets them
+        // through as it always has.
+        if (event.isRelease() || !burst.pending()) {
+            return false;
+        }
+
+        if (symbol == FcitxKey_BackSpace) {
+            if (burst.note_key(true, false, false, false, U'\0') == nexkey::KeyAction::Swallow &&
+                !burst.pending()) {
+                finish_burst(ic, state, false);
+            }
+            // Deliberately not filtered: pressing BACKSPACE is how the
+            // application deletes the character.
+            return true;
+        }
+
+        const auto code_point = fcitx::Key::keySymToUnicode(symbol);
+        const auto states = event.key().states();
+        const bool shortcut = states.test(fcitx::KeyState::Ctrl) ||
+                              states.test(fcitx::KeyState::Alt) ||
+                              states.test(fcitx::KeyState::Super);
+        const bool is_text = code_point != 0 && !shortcut;
+
+        switch (burst.note_key(false, false, is_text, !is_text,
+                               static_cast<char32_t>(code_point))) {
+        case nexkey::KeyAction::BufferText:
+            // It is typed when the burst lands, so the application must not see
+            // it now.
+            event.filterAndAccept();
+            return true;
+        case nexkey::KeyAction::FinishNow:
+            // A key that cannot wait: type what the burst holds, then handle the
+            // key itself on the normal path.
+            finish_burst(ic, state, true);
+            return false;
+        case nexkey::KeyAction::Pass:
+        case nexkey::KeyAction::Swallow:
+            return false;
+        }
+        return false;
+    }
+
+    /// The periodic look at the bursts in flight.
+    void tick()
+    {
+        probe_helper();
+
+        const auto now = monotonic_ms();
+        instance_->inputContextManager().foreach([this, now](fcitx::InputContext* ic) {
+            const auto property = ic->property(std::string(kPropertyName));
+            if (property == nullptr) {
+                return true;
+            }
+            auto& state = *static_cast<NexKeyState*>(property);
+            const auto before = state.burst.state();
+            const auto after = state.burst.poll(now);
+            if (after == nexkey::Burst::Expired) {
+                burst_lost(ic, state);
+            } else if (after == nexkey::Burst::Complete && before != nexkey::Burst::Complete) {
+                finish_burst(ic, state, false);
+            }
+            flush_commits(ic, state);
+            return true;
+        });
+    }
+
+    /// A burst never finished: the word is dropped instead of being typed on top
+    /// of a document nobody can predict.
+    void burst_lost(fcitx::InputContext* ic, NexKeyState& state)
+    {
+        state.burst.finish();
+        state.engine.discard();
+        state.direct.reset();
+        // Whatever was queued belonged to that word.
+        static_cast<void>(state.commits.take());
+
+        auto& panel = ic->inputPanel();
+        panel.setClientPreedit(fcitx::Text{});
+        panel.setCandidateList(nullptr);
+        ic->updatePreedit();
+
+        ++state.dropped;
+        FCITX_WARN() << "NexKey: a deletion burst expired for " << ic->program();
+        if (state.dropped >= 2) {
+            // Two lost bursts in a row: stop trusting the helper for this
+            // program and write the next rung of the ladder into the rules.
+            learn_delivery_failure(ic, state, delivery_decision(ic));
+        }
     }
 
     /// The sentence the diagnostics page shows for a decision.
@@ -502,14 +861,25 @@ private:
                 }
                 return "Quy tắc ứng dụng: preedit";
             }
-            return keys ? "Quy tắc ứng dụng: gõ trực tiếp, xóa bằng BackSpace"
-                        : "Quy tắc ứng dụng: gõ trực tiếp";
+            if (keys) {
+                return "Quy tắc ứng dụng: gõ trực tiếp, xóa bằng BackSpace";
+            }
+            return decision.strategy == nexkey::DeleteStrategy::InjectedKey
+                       ? "Quy tắc ứng dụng: bàn phím ảo nexkey-uinput"
+                       : "Quy tắc ứng dụng: gõ trực tiếp";
         case nexkey::DeliverySource::NoSurroundingText:
             return "Ứng dụng không cho biết nội dung, xóa bằng BackSpace";
+        case nexkey::DeliverySource::NoHelper:
+            return "Chưa chạy nexkey-uinput, xóa theo cách ứng dụng hiểu";
         case nexkey::DeliverySource::Default:
             break;
         }
-        return decision.mode == nexkey::DeliveryMode::Preedit ? "Mặc định: preedit" : "Mặc định";
+        if (decision.mode == nexkey::DeliveryMode::Preedit) {
+            return "Mặc định: preedit";
+        }
+        return decision.strategy == nexkey::DeleteStrategy::InjectedKey
+                   ? "Mặc định: bàn phím ảo nexkey-uinput xóa hộ"
+                   : "Mặc định";
     }
 
     /// Check the last replacement against the document the client reports.
@@ -525,6 +895,14 @@ private:
         std::erase_if(state.mismatches, [now](const auto& when) { return now - when > 60s; });
 
         if (ic == nullptr || !state.direct.has_pending() || !use_direct_typing(ic)) {
+            return;
+        }
+        // With the virtual keyboard the document changes asynchronously, on the
+        // kernel's schedule: a report that does not contain the edit yet is a
+        // delay, not a failure, and repairing it would delete the wrong
+        // characters. The edit is trusted instead, because the barrier already
+        // told us that every deletion was handed to the application.
+        if (delivery_decision(ic).strategy == nexkey::DeleteStrategy::InjectedKey) {
             return;
         }
         if (!ic->capabilityFlags().test(fcitx::CapabilityFlag::SurroundingText)) {
@@ -562,6 +940,7 @@ private:
             const auto repair_strategy = decision.strategy == nexkey::DeleteStrategy::SurroundingText
                                              ? nexkey::DeleteStrategy::ForwardedKey
                                              : decision.strategy;
+            flush_commits(ic, state);
             apply_edit(ic, verification->repair, repair_strategy);
             state.mismatches.push_back(now);
             ++state.dropped;
@@ -663,6 +1042,16 @@ private:
 
     void commit_all(fcitx::InputContext* ic, NexKeyState& state)
     {
+        // A burst may still be holding the tail of the word. Type it first: the
+        // deletions are already in the document and without the text they would
+        // leave the word chopped. A drained burst has handed its text out
+        // already, so it only keeps swallowing the keys that are still coming.
+        if (state.burst.state() == nexkey::Burst::Deleting ||
+            state.burst.state() == nexkey::Burst::Complete) {
+            finish_burst(ic, state, true);
+        }
+        flush_commits(ic, state);
+
         if (use_direct_typing(ic)) {
             state.engine.discard();
             state.direct.reset();
@@ -688,8 +1077,7 @@ private:
     void commit_text(fcitx::InputContext* ic, NexKeyState& state, std::string_view text)
     {
         if (use_direct_typing(ic)) {
-            const auto decision = delivery_decision(ic);
-            apply_edit(ic, state.direct.replace(text), decision.strategy);
+            deliver_edit(ic, state, state.direct.replace(text));
             state.direct.reset();
         } else if (!text.empty()) {
             ic->commitString(std::string(text));
@@ -712,8 +1100,7 @@ private:
         if (use_direct_typing(ic)) {
             const std::string next(state.engine.preedit());
             if (next != state.direct.text()) {
-                const auto decision = delivery_decision(ic);
-                apply_edit(ic, state.direct.replace(next), decision.strategy);
+                deliver_edit(ic, state, state.direct.replace(next));
             }
             auto& panel = ic->inputPanel();
             panel.setClientPreedit(fcitx::Text{});
@@ -956,6 +1343,12 @@ private:
     nexkey::DeliveryPolicy policy_;
     ToggleKey toggle_;
     fcitx::FactoryFor<NexKeyState> state_factory_;
+    /// The helper that presses BACKSPACE through a virtual keyboard.
+    nexkey::uinput::Client helper_{nexkey::uinput::default_socket_path()};
+    bool helper_answered_{false};
+    std::chrono::steady_clock::time_point helper_checked_{};
+    /// Watches the bursts in flight, see tick().
+    std::unique_ptr<fcitx::EventSourceTime> timer_;
     unsigned generation_{0};
     std::string last_learned_;
     std::int64_t last_learned_at_{0};

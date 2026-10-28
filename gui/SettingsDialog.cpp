@@ -717,7 +717,7 @@ void SettingsDialog::addAppRule()
     QStringList modes = {QStringLiteral("telex"), QStringLiteral("vni"),
                          QStringLiteral("viqr"), QStringLiteral("microsoft"),
                          QStringLiteral("preedit"), QStringLiteral("direct"),
-                         QStringLiteral("direct-keys"),
+                         QStringLiteral("direct-keys"), QStringLiteral("direct-uinput"),
                          QStringLiteral("off (English)")};
     const QString mode = QInputDialog::getItem(
         this, tr("Chọn chế độ"),

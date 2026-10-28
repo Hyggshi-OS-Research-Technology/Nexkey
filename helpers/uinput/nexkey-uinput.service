@@ -1,0 +1,33 @@
+[Unit]
+Description=NexKey virtual keyboard helper
+Documentation=https://github.com/Hyggshi-OS-Research-Technology/Nexkey/blob/main/docs/UINPUT.md
+# The input method does not depend on this service: without it NexKey asks the
+# application to delete instead. Starting late or failing is therefore harmless
+# to the session, and it must never hold up a login.
+
+[Service]
+Type=simple
+# A bare name is looked up in PATH, which keeps the unit correct for a package
+# installed below /usr and for one installed below /usr/local.
+ExecStart=nexkey-uinput
+Restart=on-failure
+RestartSec=5
+
+# The helper creates a virtual keyboard and presses BACKSPACE on it. It needs
+# nothing else from the session, so it gets nothing else.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectControlGroups=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+
+[Install]
+WantedBy=default.target
